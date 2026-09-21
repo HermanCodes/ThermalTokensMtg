@@ -20,6 +20,20 @@ export const SERVICE_UUID = 0xff00;
 export const WRITE_CHAR_UUID = 0xff02;
 export const NOTIFY_CHAR_UUID = 0xff03;
 
+/**
+ * Expand a 16-bit Bluetooth UUID to its canonical 128-bit string.
+ *
+ * Chrome accepts bare 16-bit numbers and canonicalises them itself, but other
+ * Web Bluetooth implementations (Bluefy on iOS, for one) only accept the full
+ * string form and fail obscurely on a number. Always pass the string.
+ */
+export const uuid16 = (n: number): string =>
+  `0000${n.toString(16).padStart(4, '0')}-0000-1000-8000-00805f9b34fb`;
+
+export const SERVICE_UUID_STR = uuid16(SERVICE_UUID);
+export const WRITE_CHAR_UUID_STR = uuid16(WRITE_CHAR_UUID);
+export const NOTIFY_CHAR_UUID_STR = uuid16(NOTIFY_CHAR_UUID);
+
 /** Service UUIDs advertised across Phomemo models — used to spot a printer. */
 export const KNOWN_SERVICE_UUIDS = [
   '0000ff00-0000-1000-8000-00805f9b34fb',

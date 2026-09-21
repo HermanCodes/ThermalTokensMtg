@@ -1,4 +1,9 @@
-import { SERVICE_UUID, WRITE_CHAR_UUID, NOTIFY_CHAR_UUID, KNOWN_SERVICE_UUIDS } from './protocol';
+import {
+  SERVICE_UUID_STR,
+  WRITE_CHAR_UUID_STR,
+  NOTIFY_CHAR_UUID_STR,
+  KNOWN_SERVICE_UUIDS,
+} from './protocol';
 import type { Transport, ConnectOptions } from './transport';
 
 /** One row of the connected device's GATT table, for the diagnostics panel. */
@@ -65,16 +70,16 @@ export class WebBluetoothTransport implements Transport {
     // connecting). `allDevices` shows everything nearby instead.
     this.device = await navigator.bluetooth.requestDevice(
       opts.allDevices
-        ? { acceptAllDevices: true, optionalServices: [SERVICE_UUID, ...KNOWN_SERVICE_UUIDS] }
+        ? { acceptAllDevices: true, optionalServices: [SERVICE_UUID_STR, ...KNOWN_SERVICE_UUIDS] }
         : {
             filters: [
-              { services: [SERVICE_UUID] },
+              { services: [SERVICE_UUID_STR] },
               { namePrefix: 'M110' },
               { namePrefix: 'M120' },
               { namePrefix: 'M220' },
               { namePrefix: 'M200' },
             ],
-            optionalServices: [SERVICE_UUID, ...KNOWN_SERVICE_UUIDS],
+            optionalServices: [SERVICE_UUID_STR, ...KNOWN_SERVICE_UUIDS],
           },
     );
 
@@ -125,13 +130,12 @@ export class WebBluetoothTransport implements Transport {
       }
     }
 
-    const short = (uuid: number) => uuid.toString(16).padStart(4, '0');
     const writable = (ch: BluetoothRemoteGATTCharacteristic) =>
       ch.properties.write || ch.properties.writeWithoutResponse;
 
     // 1. The documented 0xff00 / 0xff02 pair.
     const documented = table.find(
-      (e) => e.svc.includes(short(SERVICE_UUID)) && e.ch.uuid.includes(short(WRITE_CHAR_UUID)),
+      (e) => e.svc === SERVICE_UUID_STR && e.ch.uuid === WRITE_CHAR_UUID_STR,
     );
     // 2. Any writable characteristic inside a known Phomemo service.
     const known = table.find(
@@ -160,8 +164,8 @@ export class WebBluetoothTransport implements Transport {
   private async subscribeNotify(server: BluetoothRemoteGATTServer): Promise<void> {
     this.notifications = [];
     try {
-      const svc = await server.getPrimaryService(SERVICE_UUID);
-      const ch = await svc.getCharacteristic(NOTIFY_CHAR_UUID);
+      const svc = await server.getPrimaryService(SERVICE_UUID_STR);
+      const ch = await svc.getCharacteristic(NOTIFY_CHAR_UUID_STR);
       await ch.startNotifications();
       ch.addEventListener('characteristicvaluechanged', (ev) => {
         const v = (ev.target as BluetoothRemoteGATTCharacteristic).value;

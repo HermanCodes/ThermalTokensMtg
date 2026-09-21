@@ -52,25 +52,69 @@ const MODE_LABEL: Record<Mode, string> = {
 };
 
 /**
- * Turn a Web Bluetooth DOMException into something actionable.
- * The raw messages are terse and differ between Chrome and Bluefy.
+ * Describe whatever a rejected promise handed us.
+ *
+ * Chrome rejects with a DOMException, but other Web Bluetooth implementations
+ * do not: Bluefy on iOS can reject with a non-Error, and reading `.name` /
+ * `.message` off that yields "undefined: undefined" — which says nothing about
+ * what went wrong. This keeps the raw shape so the diagnostics box is useful.
  */
-function friendlyBleError(err: Error): string {
-  switch (err.name) {
+function describeThrown(e: unknown): { name: string; message: string; raw: string } {
+  if (e instanceof Error) {
+    return { name: e.name, message: e.message, raw: `${e.name}: ${e.message}` };
+  }
+  if (typeof e === 'string') return { name: 'string', message: e, raw: `string: ${e}` };
+  if (e === undefined) {
+    return { name: 'undefined', message: 'rejected with undefined', raw: 'rejected with undefined' };
+  }
+  if (e === null) {
+    return { name: 'null', message: 'rejected with null', raw: 'rejected with null' };
+  }
+  if (typeof e === 'object') {
+    const o = e as Record<string, unknown>;
+    const name =
+      typeof o.name === 'string'
+        ? o.name
+        : (o.constructor as { name?: string } | undefined)?.name ?? 'object';
+    const message = typeof o.message === 'string' ? o.message : '';
+    let json: string;
+    try {
+      json = JSON.stringify(e);
+    } catch {
+      json = '(not serialisable)';
+    }
+    return {
+      name,
+      message,
+      raw: `${name}${message ? `: ${message}` : ''} keys=[${Object.keys(o).join(',')}] ${json}`,
+    };
+  }
+  return { name: typeof e, message: String(e), raw: `${typeof e}: ${String(e)}` };
+}
+
+/** Map a thrown value to actionable text. */
+function friendlyBleError(e: unknown): string {
+  const { name, message } = describeThrown(e);
+  switch (name) {
     case 'NotFoundError':
-      return 'No printer found. Switch it on, and close any other app that is connected to it.';
+      return 'No printer found. Switch it on, and close any other app connected to it.';
     case 'SecurityError':
-      return 'Blocked. Bluetooth needs an HTTPS page — a plain http:// address will not work.';
+      return 'Blocked. Bluetooth needs an HTTPS page — plain http:// will not work.';
     case 'NotSupportedError':
-      return 'This browser cannot reach Bluetooth devices. On iPhone use Bluefy or the app build.';
+      return 'This browser cannot reach Bluetooth devices.';
     case 'NetworkError':
       return 'Could not connect. Power the printer off and on, then try again.';
     case 'InvalidStateError':
       return 'Bluetooth is off, or the printer is already connected elsewhere.';
     case 'NotAllowedError':
       return 'Permission refused. Allow Bluetooth for this site and try again.';
+    // Bluefy rejects with a bare value when it dislikes the request, most often
+    // because no device matched its scan.
+    case 'undefined':
+    case 'null':
+      return 'No printer found, or this browser rejected the request. Try “Search all Bluetooth devices”.';
     default:
-      return `${err.name}: ${err.message}`;
+      return message ? `${name}: ${message}` : `Failed: ${name}`;
   }
 }
 
@@ -463,20 +507,25 @@ export default function App() {
         }
         setStatus({ kind: 'ok', msg: `Connected to ${name}` });
       } catch (e) {
-        const err = e as Error;
-        if (t instanceof WebBluetoothTransport) {
-          setDiag([
-            `error: ${err.name}: ${err.message}`,
-            `navigator.bluetooth: ${typeof navigator !== 'undefined' && navigator.bluetooth ? 'present' : 'MISSING'}`,
-            ...t.gatt.map((g) => `   ${g.service} / ${g.characteristic} [${g.props}]`),
-          ]);
-        }
+        const d = describeThrown(e);
+        const nav = typeof navigator !== 'undefined' ? navigator.bluetooth : undefined;
+        setDiag([
+          `thrown: ${d.raw}`,
+          `ua: ${typeof navigator !== 'undefined' ? navigator.userAgent : '?'}`,
+          `secure context: ${typeof window !== 'undefined' && window.isSecureContext}`,
+          `origin: ${typeof location !== 'undefined' ? location.origin : '?'}`,
+          `navigator.bluetooth: ${nav ? 'present' : 'MISSING'}`,
+          `requestDevice: ${nav && typeof nav.requestDevice === 'function' ? 'function' : 'MISSING'}`,
+          `getAvailability: ${nav && typeof nav.getAvailability === 'function' ? 'function' : 'absent'}`,
+          `transport: ${t.name}`,
+          ...(t instanceof WebBluetoothTransport
+            ? t.gatt.map((g) => `   ${g.service} / ${g.characteristic} [${g.props}]`)
+            : []),
+        ]);
         // A cancelled chooser is not a failure worth shouting about.
-        const cancelled = err.name === 'NotFoundError' && /cancel/i.test(err.message);
+        const cancelled = d.name === 'NotFoundError' && /cancel/i.test(d.message);
         setStatus(
-          cancelled
-            ? { kind: 'idle', msg: '' }
-            : { kind: 'err', msg: friendlyBleError(err) },
+          cancelled ? { kind: 'idle', msg: '' } : { kind: 'err', msg: friendlyBleError(e) },
         );
       }
     },

@@ -1,8 +1,8 @@
-import { BleClient, numberToUUID, type ScanResult } from '@capacitor-community/bluetooth-le';
+import { BleClient, type ScanResult } from '@capacitor-community/bluetooth-le';
 import {
-  SERVICE_UUID,
-  WRITE_CHAR_UUID,
-  NOTIFY_CHAR_UUID,
+  SERVICE_UUID_STR,
+  WRITE_CHAR_UUID_STR,
+  NOTIFY_CHAR_UUID_STR,
   KNOWN_SERVICE_UUIDS,
 } from './protocol';
 import type { Transport, ConnectOptions } from './transport';
@@ -94,7 +94,7 @@ export class CapacitorBluetoothTransport implements Transport {
     const seen = new Set<string>();
 
     await BleClient.requestLEScan(
-      allDevices ? {} : { services: [numberToUUID(SERVICE_UUID)] },
+      allDevices ? {} : { services: [SERVICE_UUID_STR] },
       (result) => {
         if (seen.has(result.device.deviceId)) return;
         seen.add(result.device.deviceId);
@@ -121,8 +121,8 @@ export class CapacitorBluetoothTransport implements Transport {
     try {
       await BleClient.startNotifications(
         this.deviceId,
-        numberToUUID(SERVICE_UUID),
-        numberToUUID(NOTIFY_CHAR_UUID),
+        SERVICE_UUID_STR,
+        NOTIFY_CHAR_UUID_STR,
         (value) => {
           const hex = [...new Uint8Array(value.buffer)]
             .map((b) => b.toString(16).padStart(2, '0'))
@@ -160,8 +160,8 @@ export class CapacitorBluetoothTransport implements Transport {
       // already chunks to a safe size, and with-response is the reliable path.
       await BleClient.write(
         id,
-        numberToUUID(SERVICE_UUID),
-        numberToUUID(WRITE_CHAR_UUID),
+        SERVICE_UUID_STR,
+        WRITE_CHAR_UUID_STR,
         new DataView(buf.buffer),
       );
     });
