@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.tmp/
+.DS_Store
+
+# Capacitor: generated, but ios/App/App/Info.plist is hand-edited so ios/ is tracked.
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/DerivedData/
+ios/App/Pods/
+
+# Local scratch
+*.local
