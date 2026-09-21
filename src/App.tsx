@@ -51,6 +51,29 @@ const MODE_LABEL: Record<Mode, string> = {
   calib: 'Calibration',
 };
 
+/**
+ * Turn a Web Bluetooth DOMException into something actionable.
+ * The raw messages are terse and differ between Chrome and Bluefy.
+ */
+function friendlyBleError(err: Error): string {
+  switch (err.name) {
+    case 'NotFoundError':
+      return 'No printer found. Switch it on, and close any other app that is connected to it.';
+    case 'SecurityError':
+      return 'Blocked. Bluetooth needs an HTTPS page — a plain http:// address will not work.';
+    case 'NotSupportedError':
+      return 'This browser cannot reach Bluetooth devices. On iPhone use Bluefy or the app build.';
+    case 'NetworkError':
+      return 'Could not connect. Power the printer off and on, then try again.';
+    case 'InvalidStateError':
+      return 'Bluetooth is off, or the printer is already connected elsewhere.';
+    case 'NotAllowedError':
+      return 'Permission refused. Allow Bluetooth for this site and try again.';
+    default:
+      return `${err.name}: ${err.message}`;
+  }
+}
+
 /* --- small presentational pieces ---------------------------------------- */
 
 function Row({
@@ -227,6 +250,27 @@ export default function App() {
     [claheOn, tiles, clipLimit],
   );
 
+  /**
+   * Resolve the platform transport up front.
+   *
+   * `requestDevice()` must be reached inside the user gesture that asked for
+   * it. Awaiting a dynamic import first can spend that transient activation,
+   * leaving the call silently ignored — so the choice happens on mount, not in
+   * the tap handler.
+   */
+  useEffect(() => {
+    let live = true;
+    pickTransport().then((t) => {
+      if (!live) return;
+      transportRef.current = t;
+      if (t instanceof WebBluetoothTransport) t.writeMode = writeMode;
+    });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const t = transportRef.current;
     if (t instanceof WebBluetoothTransport) t.writeMode = writeMode;
@@ -391,12 +435,9 @@ export default function App() {
   const connect = useCallback(
     async (allDevices = false) => {
       setStatus({ kind: 'busy', msg: 'Looking for your printer…' });
+      // Already chosen on mount — no await before requestDevice.
+      const t = transportRef.current;
       try {
-        // Web Bluetooth in the browser, CoreBluetooth in the iOS shell.
-        const t = await pickTransport();
-        transportRef.current = t;
-        if (t instanceof WebBluetoothTransport) t.writeMode = writeMode;
-
         const name = await t.connect({ allDevices });
         t.onDisconnect(() => {
           setPrinterName(null);
@@ -422,11 +463,21 @@ export default function App() {
         }
         setStatus({ kind: 'ok', msg: `Connected to ${name}` });
       } catch (e) {
-        const t = transportRef.current;
+        const err = e as Error;
         if (t instanceof WebBluetoothTransport) {
-          setDiag(t.gatt.map((g) => `   ${g.service} / ${g.characteristic} [${g.props}]`));
+          setDiag([
+            `error: ${err.name}: ${err.message}`,
+            `navigator.bluetooth: ${typeof navigator !== 'undefined' && navigator.bluetooth ? 'present' : 'MISSING'}`,
+            ...t.gatt.map((g) => `   ${g.service} / ${g.characteristic} [${g.props}]`),
+          ]);
         }
-        setStatus({ kind: 'err', msg: (e as Error).message });
+        // A cancelled chooser is not a failure worth shouting about.
+        const cancelled = err.name === 'NotFoundError' && /cancel/i.test(err.message);
+        setStatus(
+          cancelled
+            ? { kind: 'idle', msg: '' }
+            : { kind: 'err', msg: friendlyBleError(err) },
+        );
       }
     },
     [writeMode],
@@ -538,20 +589,45 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              <button className="row tappable" onClick={() => connect(false)} disabled={!supported}>
+              <button
+                className="row tappable"
+                onClick={() => connect(false)}
+                disabled={!supported || busy}
+              >
                 <span className="row-label accent">
-                  <Icon.Bluetooth /> Connect printer
+                  <Icon.Bluetooth />
+                  {busy ? 'Looking for your printer…' : 'Connect printer'}
                 </span>
                 <Icon.ChevronRight />
               </button>
             )}
           </div>
 
+          {status.msg && screen === 'search' && (
+            <p className={`footnote ${status.kind}`}>{status.msg}</p>
+          )}
+
           {!supported && (
             <p className="footnote warn">
-              This browser can’t reach Bluetooth devices. On iPhone use the app build, or open
-              this page in Bluefy.
+              This browser can’t reach Bluetooth devices. On iPhone use Bluefy, or the app
+              build.
             </p>
+          )}
+
+          {status.kind === 'err' && screen === 'search' && (
+            <div className="group">
+              <button className="row tappable" onClick={() => connect(true)} disabled={busy}>
+                <span className="row-label accent">Search all Bluetooth devices</span>
+                <Icon.ChevronRight />
+              </button>
+            </div>
+          )}
+
+          {status.kind === 'err' && diag.length > 0 && screen === 'search' && (
+            <details className="diagbox">
+              <summary>Connection details</summary>
+              <pre>{diag.join('\n')}</pre>
+            </details>
           )}
 
           {results.length > 0 && (
@@ -653,7 +729,9 @@ export default function App() {
             <Row label="Print options" onClick={() => setSheet(true)} />
           </div>
 
-          {status.msg && <p className={`footnote ${status.kind}`}>{status.msg}</p>}
+          {status.msg && screen === 'detail' && (
+            <p className={`footnote ${status.kind}`}>{status.msg}</p>
+          )}
           <div className="tailspace" />
         </div>
 

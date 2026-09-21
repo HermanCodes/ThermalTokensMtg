@@ -769,3 +769,29 @@ select,
 textarea {
   font-size: 16px;
 }
+
+/* Inline diagnostics, for debugging on a phone with no dev tools. */
+.diagbox {
+  margin: 8px 4px 0;
+  font-size: 13px;
+  color: var(--label-2);
+}
+
+.diagbox summary {
+  cursor: pointer;
+  color: var(--tint);
+  padding: 4px 0;
+}
+
+.diagbox pre {
+  margin: 6px 0 0;
+  padding: 10px;
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--label-2);
+}
