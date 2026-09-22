@@ -299,7 +299,7 @@ export async function printSectioned(
     /** Override the estimated print speed used to wait between sections. */
     linesPerSecond?: number;
   } = {},
-): Promise<{ sections: number; cutReasons: string[] }> {
+): Promise<{ sections: number; cutReasons: string[]; waitsMs: number[] }> {
   const plan = planSections(height, widthBytes, {
     maxBytes: opts.maxJobBytes ?? P.MAX_JOB_BYTES,
     seams: opts.seams,
@@ -308,6 +308,7 @@ export async function printSectioned(
   });
   const total = plan.sections.length;
   const linesPerSecond = Math.max(20, opts.linesPerSecond ?? P.PRINT_LINES_PER_SEC);
+  const waitsMs: number[] = [];
 
   for (let i = 0; i < total; i++) {
     const { from, lines } = plan.sections[i];
@@ -327,9 +328,11 @@ export async function printSectioned(
       // Wait for the paper to actually move. The head is by far the slow part,
       // and nothing in the Bluetooth layer reports when it has finished.
       const printMs = ((lines + tear) / linesPerSecond) * 1000;
-      await sleep(Math.round(printMs + P.SECTION_SETTLE_MS));
+      const waitMs = Math.round(printMs + P.SECTION_SETTLE_MS);
+      waitsMs.push(waitMs);
+      await sleep(waitMs);
     }
   }
 
-  return { sections: total, cutReasons: plan.cutReasons };
+  return { sections: total, cutReasons: plan.cutReasons, waitsMs };
 }

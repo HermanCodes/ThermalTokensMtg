@@ -138,16 +138,23 @@ export const MAX_BLOCK_LINES = 0xffff;
 export const MAX_JOB_BYTES = 44000;
 
 /**
- * Rough print speed, in raster lines per second.
+ * Assumed print speed, in raster lines per second (8 lines = 1mm).
  *
- * Used only to wait for one section to finish before the next is sent. The
- * Bluetooth writes are acknowledged by the radio long before the paper moves,
- * so without this the printer is handed a second job mid-print.
+ * Used to wait for one section to finish before the next is sent: Bluetooth
+ * writes are acknowledged by the radio long before the paper moves, so without
+ * this the printer is handed a second job mid-print. It then discards the rest
+ * of the first and starts the second at the current head position, which comes
+ * out as a card cut short with the text printed over it.
+ *
+ * Deliberately pessimistic at 100 (12.5mm/s). An earlier 200 left only ~30ms of
+ * margin on a 67mm section, which failed on one attempt and succeeded on the
+ * next — the cost of guessing too high is a ruined label, the cost of guessing
+ * too low is a couple of seconds on the rare long print.
  */
-export const PRINT_LINES_PER_SEC = 200;
+export const PRINT_LINES_PER_SEC = 100;
 
 /** Extra margin on top of a section's estimated print time. */
-export const SECTION_SETTLE_MS = 700;
+export const SECTION_SETTLE_MS = 1200;
 
 /** Conservative split size for images too long to send as one block. */
 export const SAFE_BLOCK_LINES = 256;
@@ -165,7 +172,7 @@ export const DEFAULT_TEAR_FEED_PX = 80;
  * to be enabled and the firmware settles. Printing immediately can be accepted
  * and then dropped, which looks like a feed with no image.
  */
-export const CONNECT_SETTLE_MS = 400;
+export const CONNECT_SETTLE_MS = 800;
 
 /** Pause between blocks so the printer can drain its buffer. */
 export const BLOCK_DELAY_MS = 120;

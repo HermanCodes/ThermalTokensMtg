@@ -32,6 +32,7 @@ import {
   planSections,
   printTestPattern,
   MAX_JOB_BYTES,
+  PRINT_LINES_PER_SEC,
   mmToPx,
   alignWidth,
   PRINTER_WIDTH_PX,
@@ -197,6 +198,8 @@ export function usePrinter() {
   const [maxBlockLines, setMaxBlockLines] = useState(MAX_BLOCK_LINES);
   const [tearMm, setTearMm] = useState(DEFAULT_TEAR_FEED_PX / 8);
   const [maxJobBytes, setMaxJobBytes] = useState(MAX_JOB_BYTES);
+  /** Assumed print speed in mm/s; only affects the wait between sections. */
+  const [printSpeedMm, setPrintSpeedMm] = useState(PRINT_LINES_PER_SEC / 8);
   const [diag, setDiag] = useState<string[]>([]);
   const [showDiag, setShowDiag] = useState(false);
   const [printSize, setPrintSize] = useState<{ w: number; h: number } | null>(null);
@@ -483,7 +486,7 @@ export function usePrinter() {
     } catch (e) {
       setStatus({ kind: 'err', msg: (e as Error).message });
     }
-  }, [geometry, density, chunkSize, chunkDelay, media, maxBlockLines, tearMm, writeMode, maxJobBytes]);
+  }, [geometry, density, chunkSize, chunkDelay, media, maxBlockLines, tearMm, writeMode, maxJobBytes, printSpeedMm]);
 
   const print = useCallback(async () => {
     if (!selected) return;
@@ -498,9 +501,11 @@ export function usePrinter() {
       // Render once; every copy sends the same raster.
       const out = renderRaster();
       if (!out) throw new Error('Nothing to print yet — the card image is still loading');
+      let result: Awaited<ReturnType<typeof printSectioned>> | null = null;
       for (let i = 0; i < copies; i++) {
-        await printSectioned(t, out.raster, out.height, geometry.widthBytes, {
+        result = await printSectioned(t, out.raster, out.height, geometry.widthBytes, {
           maxJobBytes,
+          linesPerSecond: printSpeedMm * 8,
           seams: 'seams' in out ? (out as { seams?: number[] }).seams : undefined,
           density,
           chunkSize,
@@ -522,6 +527,16 @@ export function usePrinter() {
         widthBytes: geometry.widthBytes,
       });
       const parts = plan.sections.length;
+      if (parts > 1 && result) {
+        const r = result;
+        const replies = asDiagnosable(t)?.notifications.length ?? 0;
+        setDiag((d) => [
+          `last print: ${parts} sections, cuts ${r.cutReasons.join('+')},` +
+            ` waits ${r.waitsMs.map((w: number) => `${(w / 1000).toFixed(1)}s`).join('+')}`,
+          `printer replied ${replies} time(s)`,
+          ...d.filter((l) => !l.startsWith('last print:') && !l.startsWith('printer replied')),
+        ]);
+      }
       const inSections = parts > 1 ? `, in ${parts} sections` : '';
       setStatus({
         kind: 'ok',
@@ -535,7 +550,7 @@ export function usePrinter() {
     } finally {
       setProgress(0);
     }
-  }, [selected, copies, geometry, renderRaster, density, chunkSize, chunkDelay, media, maxBlockLines, tearMm, writeMode, maxJobBytes]);
+  }, [selected, copies, geometry, renderRaster, density, chunkSize, chunkDelay, media, maxBlockLines, tearMm, writeMode, maxJobBytes, printSpeedMm]);
 
   const busy = status.kind === 'busy';
   const open = (c: TokenCard) => {
@@ -568,6 +583,7 @@ export function usePrinter() {
     chunkDelay, setChunkDelay, maxBlockLines, setMaxBlockLines,
     supported, diag, showDiag, setShowDiag,
     maxJobBytes, setMaxJobBytes,
+    printSpeedMm, setPrintSpeedMm,
     connect, print, testPrint,
     // navigation (the phone view uses these; desktop shows everything at once)
     screen, setScreen, sheet, setSheet, open,

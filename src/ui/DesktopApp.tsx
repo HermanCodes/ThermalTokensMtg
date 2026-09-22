@@ -48,6 +48,7 @@ export default function DesktopApp({
     chunkDelay, setChunkDelay, maxBlockLines, setMaxBlockLines,
     supported, diag, showDiag, setShowDiag,
     maxJobBytes, setMaxJobBytes,
+    printSpeedMm, setPrintSpeedMm,
     connect, print, testPrint,
   } = api;
 
@@ -545,6 +546,18 @@ export default function DesktopApp({
                     [180, '180 B'],
                   ]}
                   onChange={(v) => setChunkSize(Number(v))}
+                />
+                <SelectRow
+                  label="Print speed"
+                  value={printSpeedMm}
+                  options={[
+                    [10, '10 mm/s (safest)'],
+                    [12.5, '12.5 mm/s'],
+                    [15, '15 mm/s'],
+                    [20, '20 mm/s'],
+                    [25, '25 mm/s (fastest)'],
+                  ]}
+                  onChange={(v) => setPrintSpeedMm(Number(v))}
                 />
                 <SelectRow
                   label="Max job size"
