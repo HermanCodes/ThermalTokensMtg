@@ -70,7 +70,7 @@ const fmt = (n: number) => (n > 0 ? `+${n}` : `${n}`);
 export function buildCalibrationStrip(
   img: HTMLImageElement,
   opts: CalibrationOptions,
-): { raster: Uint8Array; height: number } {
+): { raster: Uint8Array; height: number; seams: number[] } {
   const {
     widthBytes,
     brightnessValues: brights,
@@ -154,6 +154,9 @@ export function buildCalibrationStrip(
     blit(out, widthBytes, height, cell, cellWBytes, cellH, xBytes, y);
   };
 
+  // Sample boundaries: a strip too long for one job is cut between samples.
+  const seams: number[] = [];
+
   let y = HEADER_H;
   if (layout === 'stack') {
     for (const { b, c } of cells) {
@@ -174,6 +177,7 @@ export function buildCalibrationStrip(
       // Full-width rule so adjacent cells read as separate samples.
       const ruleY = y - 1;
       for (let bb = 0; bb < widthBytes; bb++) out[ruleY * widthBytes + bb] = 0xff;
+      seams.push(y);
     }
   } else {
     for (const b of brights) {
@@ -190,10 +194,11 @@ export function buildCalibrationStrip(
       y += LABEL_H;
       contrasts.forEach((c, i) => drawCell(b, c, i * cellWBytes, y));
       y += cellH;
+      seams.push(y);
     }
   }
 
-  return { raster: out, height };
+  return { raster: out, height, seams };
 }
 
 /** Parse a comma-separated list of numbers, ignoring blanks and junk. */

@@ -100,12 +100,15 @@ export interface CombinedOptions {
  *
  * Gives you the card to recognise at a glance and the crisp P/T and rules text
  * to actually read — which a dithered card alone can't provide at 203 dpi.
+ *
+ * Returns the seam between the two, so a label too long for one print job is
+ * divided there rather than part-way through a line of rules text.
  */
 export function buildCombinedLabel(
   img: HTMLImageElement,
   token: TokenCard,
   opts: CombinedOptions,
-): { raster: Uint8Array; height: number } {
+): { raster: Uint8Array; height: number; seams: number[] } {
   const {
     widthBytes,
     textHeightPx,
@@ -178,5 +181,7 @@ export function buildCombinedLabel(
     cardH + gap,
   );
 
-  return { raster: out, height };
+  // The divider is the one place this label can be cut without splitting
+  // anything: above it is the picture, below it the text.
+  return { raster: out, height, seams: [cardH + gap] };
 }

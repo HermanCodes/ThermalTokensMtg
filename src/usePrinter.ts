@@ -501,6 +501,7 @@ export function usePrinter() {
       for (let i = 0; i < copies; i++) {
         await printSectioned(t, out.raster, out.height, geometry.widthBytes, {
           maxJobBytes,
+          seams: 'seams' in out ? (out as { seams?: number[] }).seams : undefined,
           density,
           chunkSize,
           chunkDelayMs: chunkDelay,
@@ -514,7 +515,13 @@ export function usePrinter() {
       // Only now is the chosen characteristic proven, so it is safe to reuse.
       asDiagnosable(t)?.confirmWorking();
       const secs = ((performance.now() - started) / 1000).toFixed(1);
-      const parts = planSections(out.height, geometry.widthBytes, maxJobBytes).sections.length;
+      const plan = planSections(out.height, geometry.widthBytes, {
+        maxBytes: maxJobBytes,
+        seams: 'seams' in out ? (out as { seams?: number[] }).seams : undefined,
+        raster: out.raster,
+        widthBytes: geometry.widthBytes,
+      });
+      const parts = plan.sections.length;
       const inSections = parts > 1 ? `, in ${parts} sections` : '';
       setStatus({
         kind: 'ok',

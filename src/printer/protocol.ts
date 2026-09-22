@@ -137,6 +137,18 @@ export const MAX_BLOCK_LINES = 0xffff;
  */
 export const MAX_JOB_BYTES = 44000;
 
+/**
+ * Rough print speed, in raster lines per second.
+ *
+ * Used only to wait for one section to finish before the next is sent. The
+ * Bluetooth writes are acknowledged by the radio long before the paper moves,
+ * so without this the printer is handed a second job mid-print.
+ */
+export const PRINT_LINES_PER_SEC = 200;
+
+/** Extra margin on top of a section's estimated print time. */
+export const SECTION_SETTLE_MS = 700;
+
 /** Conservative split size for images too long to send as one block. */
 export const SAFE_BLOCK_LINES = 256;
 /**

@@ -161,34 +161,114 @@ export interface SectionPlan {
   /** First raster line of each section, and how many lines it covers. */
   sections: { from: number; lines: number }[];
   bytesPerSection: number[];
+  /** How each cut was chosen, for diagnostics. */
+  cutReasons: ('seam' | 'blank row' | 'forced')[];
+}
+
+export interface PlanOptions {
+  maxBytes?: number;
+  /**
+   * Positions the renderer says are safe to cut at — the divider between a card
+   * and its text, or the gaps between calibration samples.
+   */
+  seams?: number[];
+  /**
+   * The image itself. With no seam available, an all-white row is found near
+   * the target so a cut never lands through a glyph or a run of art.
+   */
+  raster?: Uint8Array;
+  widthBytes?: number;
+}
+
+/** True when this raster row has no ink at all. */
+function isBlankRow(raster: Uint8Array, widthBytes: number, y: number): boolean {
+  const from = y * widthBytes;
+  for (let i = from; i < from + widthBytes; i++) if (raster[i] !== 0) return false;
+  return true;
 }
 
 /**
  * Work out how to divide a raster into printable jobs.
  *
- * Splits on whole lines at the largest size the printer accepts. A single
- * section is returned unchanged, so short labels are unaffected.
+ * Cuts are chosen, not merely measured out. Splitting on byte count alone lands
+ * halfway through a line of rules text, so a seam the renderer vouched for is
+ * preferred, then a blank row near the target, and only failing both is the raw
+ * position used.
  */
 export function planSections(
   height: number,
   widthBytes: number,
-  maxBytes = P.MAX_JOB_BYTES,
+  opts: PlanOptions | number = {},
 ): SectionPlan {
+  // Older call sites passed maxBytes positionally.
+  const o: PlanOptions = typeof opts === 'number' ? { maxBytes: opts } : opts;
+  const maxBytes = o.maxBytes ?? P.MAX_JOB_BYTES;
   const linesPerJob = Math.max(1, Math.floor(maxBytes / widthBytes));
+
   if (height <= linesPerJob) {
-    return { sections: [{ from: 0, lines: height }], bytesPerSection: [height * widthBytes] };
+    return {
+      sections: [{ from: 0, lines: height }],
+      bytesPerSection: [height * widthBytes],
+      cutReasons: [],
+    };
   }
-  // Spread the lines evenly rather than leaving a sliver at the end: a 2mm
-  // final section would be torn off and lost.
-  const count = Math.ceil(height / linesPerJob);
-  const even = Math.ceil(height / count);
+
+  // Never leave a scrap that would just be torn off and lost.
+  const minLines = Math.max(8, Math.round(linesPerJob * 0.15));
+  // How far back from the ideal cut it is worth looking for a clean one.
+  const window = Math.round(linesPerJob * 0.35);
+  const seams = (o.seams ?? []).filter((y) => y > 0 && y < height).sort((a, b) => a - b);
+
+  const cuts: number[] = [];
+  const reasons: ('seam' | 'blank row' | 'forced')[] = [];
+  let pos = 0;
+
+  while (height - pos > linesPerJob) {
+    const target = pos + linesPerJob;
+    const lowest = pos + minLines;
+
+    // 1. A seam the renderer offered, as late as possible without overshooting.
+    const seam = [...seams].reverse().find((y) => y > lowest && y <= target);
+    if (seam !== undefined) {
+      cuts.push(seam);
+      reasons.push('seam');
+      pos = seam;
+      continue;
+    }
+
+    // 2. Failing that, a row with no ink in it.
+    let blank: number | undefined;
+    if (o.raster && o.widthBytes) {
+      for (let y = target; y >= Math.max(lowest, target - window); y--) {
+        if (isBlankRow(o.raster, o.widthBytes, y)) {
+          blank = y;
+          break;
+        }
+      }
+    }
+    if (blank !== undefined) {
+      cuts.push(blank);
+      reasons.push('blank row');
+      pos = blank;
+      continue;
+    }
+
+    // 3. Nothing clean within reach — cut where the size demands.
+    cuts.push(target);
+    reasons.push('forced');
+    pos = target;
+  }
+
+  const bounds = [0, ...cuts, height];
   const sections: { from: number; lines: number }[] = [];
-  for (let from = 0; from < height; from += even) {
-    sections.push({ from, lines: Math.min(even, height - from) });
+  for (let i = 0; i < bounds.length - 1; i++) {
+    sections.push({ from: bounds[i], lines: bounds[i + 1] - bounds[i] });
   }
+
   return {
     sections,
     bytesPerSection: sections.map((s) => s.lines * widthBytes),
+    cutReasons: reasons,
   };
 }
 
@@ -200,33 +280,56 @@ export function planSections(
  * paper. Splitting inside a single job is not the answer either, because the
  * printer feeds between GS v 0 blocks and the gaps land in the middle of the
  * label. Separate jobs are the one approach that works: each is small enough to
- * be accepted, and only the last carries the tear-off feed, so the sections
- * come out as one continuous strip with a minimal seam.
+ * be accepted, and only the last carries the tear-off feed.
+ *
+ * Each section must FINISH PRINTING before the next is sent. Bluetooth writes
+ * are acknowledged by the radio long before the paper moves, so sending
+ * straight on hands a second job to a printer still working through the first:
+ * it drops the data and is left in a state where the next attempt comes out
+ * garbled too.
  */
 export async function printSectioned(
   transport: Transport,
   raster: Uint8Array,
   height: number,
   widthBytes = P.BYTES_PER_LINE,
-  opts: PrintOptions & { maxJobBytes?: number } = {},
-): Promise<{ sections: number }> {
-  const plan = planSections(height, widthBytes, opts.maxJobBytes ?? P.MAX_JOB_BYTES);
+  opts: PrintOptions & {
+    maxJobBytes?: number;
+    seams?: number[];
+    /** Override the estimated print speed used to wait between sections. */
+    linesPerSecond?: number;
+  } = {},
+): Promise<{ sections: number; cutReasons: string[] }> {
+  const plan = planSections(height, widthBytes, {
+    maxBytes: opts.maxJobBytes ?? P.MAX_JOB_BYTES,
+    seams: opts.seams,
+    raster,
+    widthBytes,
+  });
   const total = plan.sections.length;
+  const linesPerSecond = Math.max(20, opts.linesPerSecond ?? P.PRINT_LINES_PER_SEC);
 
   for (let i = 0; i < total; i++) {
     const { from, lines } = plan.sections[i];
     const slice = raster.subarray(from * widthBytes, (from + lines) * widthBytes);
     const last = i === total - 1;
+    const tear = last ? (opts.tearFeedPx ?? P.DEFAULT_TEAR_FEED_PX) : 0;
+
     await printRaster(transport, slice, lines, widthBytes, {
       ...opts,
-      // Only the final section needs the tear-off allowance; adding it between
-      // sections would push a blank gap into the middle of the label.
-      tearFeedPx: last ? opts.tearFeedPx : 0,
+      // Only the final section carries the tear-off allowance; adding it
+      // between sections would push a blank gap into the middle of the label.
+      tearFeedPx: tear,
       onProgress: (f) => opts.onProgress?.((i + f) / total),
     });
-    // Let the printer finish the section before the next job's setup arrives.
-    if (!last) await sleep(P.BLOCK_DELAY_MS);
+
+    if (!last) {
+      // Wait for the paper to actually move. The head is by far the slow part,
+      // and nothing in the Bluetooth layer reports when it has finished.
+      const printMs = ((lines + tear) / linesPerSecond) * 1000;
+      await sleep(Math.round(printMs + P.SECTION_SETTLE_MS));
+    }
   }
 
-  return { sections: total };
+  return { sections: total, cutReasons: plan.cutReasons };
 }
