@@ -118,6 +118,26 @@ function friendlyBleError(e: unknown): string {
   }
 }
 
+/**
+ * Both transports expose the same diagnostics surface, so the UI reads it
+ * structurally rather than switching on which class is in use.
+ */
+interface Diagnosable {
+  gatt: { service: string; characteristic: string; props: string; chosen: boolean }[];
+  matchPath?: string;
+  notifications: string[];
+  writeMode: 'with-response' | 'without-response';
+  isUncertain(): boolean;
+  confirmWorking(): void;
+}
+
+function asDiagnosable(t: unknown): Diagnosable | null {
+  const d = t as Partial<Diagnosable> | null;
+  return d && Array.isArray(d.gatt) && typeof d.confirmWorking === 'function'
+    ? (d as Diagnosable)
+    : null;
+}
+
 /* --- small presentational pieces ---------------------------------------- */
 
 function Row({
@@ -310,7 +330,8 @@ export default function App() {
     pickTransport().then((t) => {
       if (!live) return;
       transportRef.current = t;
-      if (t instanceof WebBluetoothTransport) t.writeMode = writeMode;
+      const d = asDiagnosable(t);
+      if (d) d.writeMode = writeMode;
     });
     return () => {
       live = false;
@@ -319,8 +340,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const t = transportRef.current;
-    if (t instanceof WebBluetoothTransport) t.writeMode = writeMode;
+    const d = asDiagnosable(transportRef.current);
+    if (d) d.writeMode = writeMode;
   }, [writeMode]);
 
   /** Per-mode defaults. Contrast stays a user control even with auto on. */
@@ -487,6 +508,8 @@ export default function App() {
       setStatus({ kind: 'busy', msg: 'Looking for your printer…' });
       // Already chosen on mount — no await before requestDevice.
       const t = transportRef.current;
+      const d = asDiagnosable(t);
+      if (d) d.writeMode = writeMode;
       try {
         const name = await t.connect({ allDevices });
         t.onDisconnect(() => {
@@ -495,14 +518,15 @@ export default function App() {
         });
         setPrinterName(name);
 
-        if (t instanceof WebBluetoothTransport) {
+        if (d) {
           setDiag([
-            `match: ${t.matchPath ?? 'none'}`,
-            ...t.gatt.map(
+            `transport: ${t.name}`,
+            `match: ${d.matchPath ?? 'none'}`,
+            ...d.gatt.map(
               (g) => `${g.chosen ? '>> ' : '   '}${g.service} / ${g.characteristic} [${g.props}]`,
             ),
           ]);
-          if (t.isUncertain()) {
+          if (d.isUncertain()) {
             setShowDiag(true);
             setStatus({
               kind: 'err',
@@ -524,9 +548,9 @@ export default function App() {
           `requestDevice: ${nav && typeof nav.requestDevice === 'function' ? 'function' : 'MISSING'}`,
           `getAvailability: ${nav && typeof nav.getAvailability === 'function' ? 'function' : 'absent'}`,
           `transport: ${t.name}`,
-          ...(t instanceof WebBluetoothTransport
-            ? t.gatt.map((g) => `   ${g.service} / ${g.characteristic} [${g.props}]`)
-            : []),
+          ...(asDiagnosable(t)?.gatt.map(
+            (g) => `   ${g.service} / ${g.characteristic} [${g.props}]`,
+          ) ?? []),
         ]);
         // A cancelled chooser is not a failure worth shouting about.
         const cancelled = d.name === 'NotFoundError' && /cancel/i.test(d.message);
@@ -585,7 +609,7 @@ export default function App() {
         });
       }
       // Only now is the chosen characteristic proven, so it is safe to reuse.
-      if (t instanceof WebBluetoothTransport) t.confirmWorking();
+      asDiagnosable(t)?.confirmWorking();
       const secs = ((performance.now() - started) / 1000).toFixed(1);
       setStatus({
         kind: 'ok',

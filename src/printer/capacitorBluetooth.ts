@@ -1,11 +1,25 @@
-import { BleClient, type ScanResult } from '@capacitor-community/bluetooth-le';
 import {
-  SERVICE_UUID_STR,
-  WRITE_CHAR_UUID_STR,
-  NOTIFY_CHAR_UUID_STR,
-  KNOWN_SERVICE_UUIDS,
-} from './protocol';
+  BleClient,
+  type BleCharacteristic,
+  type BleDevice,
+} from '@capacitor-community/bluetooth-le';
+import { SERVICE_UUID_STR, NOTIFY_CHAR_UUID_STR } from './protocol';
+import {
+  pickWritable,
+  saveRemembered,
+  propsOf,
+  type GattEntryOf,
+  type MatchPath,
+} from './gattPick';
 import type { Transport, ConnectOptions } from './transport';
+
+/** One row of the connected device's GATT table, for the diagnostics panel. */
+export interface GattEntry {
+  service: string;
+  characteristic: string;
+  props: string;
+  chosen: boolean;
+}
 
 /**
  * CoreBluetooth transport for the iOS build, via @capacitor-community/bluetooth-le.
@@ -15,129 +29,177 @@ import type { Transport, ConnectOptions } from './transport';
  * this file — the protocol, renderer, dithering and UI — is shared with the web
  * build; only the GATT calls differ.
  *
- * iOS specifics worth knowing:
- *   - CoreBluetooth addresses peripherals by an opaque per-app UUID, not a MAC.
- *     The id is stable for this app+device pair, so it can be remembered.
- *   - There is no `requestDevice` chooser. We scan ourselves, which is why the
- *     caller supplies `onDiscover` to drive a picker.
- *   - `Info.plist` must carry NSBluetoothAlwaysUsageDescription or the first
- *     BLE call kills the app.
+ * Two things this must NOT assume:
+ *   - That the printer exposes the documented 0xff00/0xff02 pair. Some units do
+ *     not, so services are discovered and a characteristic is chosen by the
+ *     same precedence the web transport uses.
+ *   - That a scan filter will match. The advertised services need not include
+ *     the one used for printing, so the device picker is unfiltered by default
+ *     and the user identifies the printer by name.
+ *
+ * `Info.plist` must carry NSBluetoothAlwaysUsageDescription or the first BLE
+ * call terminates the app.
  */
 export class CapacitorBluetoothTransport implements Transport {
   readonly name = 'CoreBluetooth';
   private deviceId?: string;
+  private pair?: { service: string; characteristic: string };
+  private useNoResponse = false;
   private connected = false;
   private disconnectCb?: () => void;
   /** Serialises writes — overlapping GATT writes are rejected. */
   private queue: Promise<unknown> = Promise.resolve();
 
+  gatt: GattEntry[] = [];
+  matchPath?: MatchPath;
   notifications: string[] = [];
-  /** Remembered so a picker can show what was found. */
-  lastScan: { id: string; name?: string }[] = [];
 
-  /** Scan duration when no device id is supplied. */
-  private static SCAN_MS = 6000;
+  /**
+   * `without-response` skips the per-write acknowledgement. On iOS the MTU is
+   * usually 185, so it is both safe and much faster than the web path — but the
+   * caller still has to size chunks for it.
+   */
+  writeMode: 'with-response' | 'without-response' = 'with-response';
 
   static isSupported(): boolean {
-    // The plugin only resolves on a native shell; on the web build the Web
-    // Bluetooth transport is used instead.
     return typeof (window as unknown as { Capacitor?: unknown }).Capacitor !== 'undefined';
   }
 
   isConnected(): boolean {
-    return this.connected && !!this.deviceId;
+    return this.connected && !!this.deviceId && !!this.pair;
   }
 
-  /**
-   * Connect to the printer.
-   *
-   * With no remembered id, scans for anything advertising a known Phomemo
-   * service and takes the strongest signal. `allDevices` scans without a
-   * service filter, for units that do not advertise their service UUID — the
-   * same failure mode the web build hits.
-   */
-  async connect(opts: ConnectOptions & { deviceId?: string } = {}): Promise<string> {
+  isUncertain(): boolean {
+    return this.matchPath === 'brute-force';
+  }
+
+  async connect(opts: ConnectOptions = {}): Promise<string> {
     await BleClient.initialize({ androidNeverForLocation: true });
 
-    let id = opts.deviceId ?? this.deviceId;
-    let label = 'Phomemo printer';
+    await BleClient.setDisplayStrings({
+      scanning: 'Looking for your printer…',
+      cancel: 'Cancel',
+      availableDevices: 'Printers nearby',
+      noDeviceFound: 'No Bluetooth devices found',
+    }).catch(() => {
+      /* cosmetic only */
+    });
 
-    if (!id) {
-      const found = await this.scan(opts.allDevices === true);
-      if (found.length === 0) {
-        throw new Error(
-          'No printer found. Check it is switched on, has paper, and is not still ' +
-            'connected to another app.',
-        );
-      }
-      // Strongest signal first — the printer is usually the nearest device.
-      found.sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999));
-      id = found[0].device.deviceId;
-      label = found[0].device.name || found[0].localName || label;
+    // requestDevice shows the plugin's native picker on iOS, so the printer is
+    // chosen by name rather than guessed from signal strength. Filtering by
+    // service would hide units that do not advertise it, which is the same
+    // failure the web build hits — so only filter when explicitly asked.
+    let device: BleDevice;
+    try {
+      device = await BleClient.requestDevice(
+        opts.allDevices === false ? { services: [SERVICE_UUID_STR] } : {},
+      );
+    } catch (e) {
+      throw new Error(
+        `No printer selected. ${(e as Error)?.message ?? ''}`.trim() +
+          ' Check it is switched on and not still connected to another app.',
+      );
     }
 
-    await BleClient.connect(id, () => {
+    await BleClient.connect(device.deviceId, () => {
       this.connected = false;
+      this.pair = undefined;
       this.disconnectCb?.();
     });
 
-    this.deviceId = id;
+    this.deviceId = device.deviceId;
     this.connected = true;
 
+    await this.discover();
+    if (!this.pair) {
+      throw new Error(
+        `Connected, but found no writable characteristic among ${this.gatt.length} entries.`,
+      );
+    }
+
     await this.subscribeNotify();
-    return label;
+    return device.name || device.deviceId.slice(0, 8);
   }
 
-  /** Scan for Phomemo-looking peripherals. */
-  private async scan(allDevices: boolean): Promise<ScanResult[]> {
-    const results: ScanResult[] = [];
-    const seen = new Set<string>();
+  /** Enumerate every service, then choose a characteristic to write to. */
+  private async discover(): Promise<void> {
+    const id = this.deviceId!;
+    this.gatt = [];
+    this.pair = undefined;
+    this.matchPath = undefined;
 
-    await BleClient.requestLEScan(
-      allDevices ? {} : { services: [SERVICE_UUID_STR] },
-      (result) => {
-        if (seen.has(result.device.deviceId)) return;
-        seen.add(result.device.deviceId);
-        // Without a service filter, keep only plausible printers: a known
-        // service UUID, or the bare all-caps serial the M110 often advertises.
-        if (allDevices && !looksLikePrinter(result)) return;
-        results.push(result);
-        this.lastScan.push({ id: result.device.deviceId, name: result.device.name });
-      },
+    // discoverServices forces a fresh interrogation; getServices reads the
+    // cached table CoreBluetooth built.
+    await BleClient.discoverServices(id).catch(() => {
+      /* some firmware only answers getServices */
+    });
+    const services = await BleClient.getServices(id);
+
+    const entries: GattEntryOf<BleCharacteristic>[] = [];
+    for (const svc of services) {
+      for (const ch of svc.characteristics) {
+        const props = propsOf(ch.properties as unknown as Record<string, unknown>);
+        entries.push({
+          service: svc.uuid,
+          characteristic: ch.uuid,
+          writable: ch.properties.write || ch.properties.writeWithoutResponse,
+          props,
+          ref: ch,
+        });
+        this.gatt.push({ service: svc.uuid, characteristic: ch.uuid, props, chosen: false });
+      }
+    }
+
+    const { chosen, matchPath } = pickWritable(entries);
+    this.matchPath = matchPath;
+    if (!chosen) return;
+
+    this.pair = { service: chosen.service, characteristic: chosen.characteristic };
+    // Only use unacknowledged writes if the characteristic actually offers it.
+    this.useNoResponse =
+      this.writeMode === 'without-response' && chosen.ref.properties.writeWithoutResponse;
+
+    const row = this.gatt.find(
+      (g) => g.service === chosen.service && g.characteristic === chosen.characteristic,
     );
-
-    await new Promise((r) => setTimeout(r, CapacitorBluetoothTransport.SCAN_MS));
-    await BleClient.stopLEScan();
-    return results;
+    if (row) row.chosen = true;
   }
 
   /**
-   * Subscribe to the notify characteristic. Some firmware only accepts raster
-   * data once notifications are enabled.
+   * Subscribe to the notify characteristic if the chosen service has one.
+   * Some firmware only accepts raster data once notifications are enabled.
    */
   private async subscribeNotify(): Promise<void> {
     this.notifications = [];
-    if (!this.deviceId) return;
+    if (!this.deviceId || !this.pair) return;
+    const notify = this.gatt.find(
+      (g) =>
+        g.service.toLowerCase() === this.pair!.service.toLowerCase() &&
+        g.characteristic.toLowerCase() !== this.pair!.characteristic.toLowerCase() &&
+        /notify/.test(g.props),
+    );
+    const uuid = notify?.characteristic ?? NOTIFY_CHAR_UUID_STR;
     try {
-      await BleClient.startNotifications(
-        this.deviceId,
-        SERVICE_UUID_STR,
-        NOTIFY_CHAR_UUID_STR,
-        (value) => {
-          const hex = [...new Uint8Array(value.buffer)]
-            .map((b) => b.toString(16).padStart(2, '0'))
-            .join(' ');
-          this.notifications.push(hex);
-        },
-      );
+      await BleClient.startNotifications(this.deviceId, this.pair.service, uuid, (value) => {
+        const hex = [...new Uint8Array(value.buffer)]
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join(' ');
+        this.notifications.push(hex);
+      });
     } catch {
       // Not fatal — plenty of units print without it.
     }
   }
 
+  /** Record the pair that worked, so the next connect targets it directly. */
+  confirmWorking(): void {
+    if (this.pair) saveRemembered(this.pair);
+  }
+
   async disconnect(): Promise<void> {
     const id = this.deviceId;
     this.connected = false;
+    this.pair = undefined;
     if (id) {
       try {
         await BleClient.disconnect(id);
@@ -149,21 +211,22 @@ export class CapacitorBluetoothTransport implements Transport {
 
   write(data: Uint8Array): Promise<void> {
     const id = this.deviceId;
-    if (!id || !this.connected) return Promise.reject(new Error('Printer not connected'));
+    const pair = this.pair;
+    if (!id || !pair || !this.connected) {
+      return Promise.reject(new Error('Printer not connected'));
+    }
 
     const run = this.queue.then(async () => {
       // Copy into its own buffer: a subarray view would otherwise send the
       // whole backing ArrayBuffer.
       const buf = new Uint8Array(data.length);
       buf.set(data);
-      // writeWithoutResponse is faster but cannot exceed the MTU; the caller
-      // already chunks to a safe size, and with-response is the reliable path.
-      await BleClient.write(
-        id,
-        SERVICE_UUID_STR,
-        WRITE_CHAR_UUID_STR,
-        new DataView(buf.buffer),
-      );
+      const view = new DataView(buf.buffer);
+      if (this.useNoResponse) {
+        await BleClient.writeWithoutResponse(id, pair.service, pair.characteristic, view);
+      } else {
+        await BleClient.write(id, pair.service, pair.characteristic, view);
+      }
     });
     this.queue = run.catch(() => {});
     return run;
@@ -172,19 +235,4 @@ export class CapacitorBluetoothTransport implements Transport {
   onDisconnect(cb: () => void): void {
     this.disconnectCb = cb;
   }
-}
-
-/** A bare all-caps serial (e.g. "Q199E45K1234567") or a known service UUID. */
-function looksLikePrinter(result: ScanResult): boolean {
-  const name = (result.device.name ?? result.localName ?? '').trim();
-  if (/^(M110|M120|M220|M200)/i.test(name)) return true;
-  const advertised = (result.uuids ?? []).map((u) => u.toLowerCase());
-  if (advertised.some((u) => KNOWN_SERVICE_UUIDS.includes(u))) return true;
-  return (
-    name.length >= 10 &&
-    name.length <= 18 &&
-    /^[A-Z0-9]+$/.test(name) &&
-    /[0-9]/.test(name) &&
-    /[A-Z]/.test(name)
-  );
 }
