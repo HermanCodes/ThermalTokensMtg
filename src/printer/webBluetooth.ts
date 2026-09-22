@@ -1,4 +1,4 @@
-import { SERVICE_UUID_STR, NOTIFY_CHAR_UUID_STR, KNOWN_SERVICE_UUIDS } from './protocol';
+import { SERVICE_UUID_STR, KNOWN_SERVICE_UUIDS, canonicalUuid } from './protocol';
 import {
   pickWritable,
   saveRemembered,
@@ -29,6 +29,7 @@ export class WebBluetoothTransport implements Transport {
   readonly name = 'Web Bluetooth';
   private device?: BluetoothDevice;
   private characteristic?: BluetoothRemoteGATTCharacteristic;
+  private notifyChar?: BluetoothRemoteGATTCharacteristic;
   private disconnectCb?: () => void;
   /** Serialises writes — concurrent GATT writes throw "operation already in progress". */
   private queue: Promise<unknown> = Promise.resolve();
@@ -36,6 +37,8 @@ export class WebBluetoothTransport implements Transport {
   /** Full GATT table from the last connect, so the UI can show what was found. */
   gatt: GattEntry[] = [];
   matchPath?: MatchPath;
+  /** Whether notifications were enabled, and why not if they were not. */
+  notifyState = 'not attempted';
   /** The service/characteristic actually in use. */
   chosenPair?: { service: string; characteristic: string };
   /** Bytes the printer sent back on the notify characteristic, if any. */
@@ -102,7 +105,7 @@ export class WebBluetoothTransport implements Transport {
       );
     }
 
-    await this.subscribeNotify(server);
+    await this.subscribeNotify();
     return this.device.name || 'Phomemo printer';
   }
 
@@ -152,6 +155,13 @@ export class WebBluetoothTransport implements Transport {
         (g) => g.service === chosen.service && g.characteristic === chosen.characteristic,
       );
       if (row) row.chosen = true;
+
+      // Keep the notify characteristic's own object. Looking it up again by
+      // UUID string is what broke on Bluefy, which reports this service as
+      // "FF00" and does not resolve the canonical 128-bit spelling.
+      this.notifyChar = table.find(
+        (e) => canonicalUuid(e.svc) === canonicalUuid(chosen.service) && e.ch.properties.notify,
+      )?.ch;
     }
   }
 
@@ -165,15 +175,20 @@ export class WebBluetoothTransport implements Transport {
   }
 
   /**
-   * Subscribe to the notify characteristic. Some firmware only starts accepting
-   * raster data once notifications are enabled, and the replies are useful
-   * evidence that the printer is actually listening.
+   * Enable notifications on the chosen service.
+   *
+   * Some firmware only starts accepting raster data once notifications are on,
+   * so a silent failure here shows up as the motor feeding blank paper. The
+   * outcome is recorded rather than swallowed.
    */
-  private async subscribeNotify(server: BluetoothRemoteGATTServer): Promise<void> {
+  private async subscribeNotify(): Promise<void> {
     this.notifications = [];
+    const ch = this.notifyChar;
+    if (!ch) {
+      this.notifyState = 'no notify characteristic in this service';
+      return;
+    }
     try {
-      const svc = await server.getPrimaryService(SERVICE_UUID_STR);
-      const ch = await svc.getCharacteristic(NOTIFY_CHAR_UUID_STR);
       await ch.startNotifications();
       ch.addEventListener('characteristicvaluechanged', (ev) => {
         const v = (ev.target as BluetoothRemoteGATTCharacteristic).value;
@@ -183,8 +198,9 @@ export class WebBluetoothTransport implements Transport {
           .join(' ');
         this.notifications.push(hex);
       });
-    } catch {
-      // Not fatal — plenty of units print without it.
+      this.notifyState = `subscribed (${ch.uuid})`;
+    } catch (e) {
+      this.notifyState = `FAILED: ${(e as Error)?.name ?? 'error'}: ${(e as Error)?.message ?? e}`;
     }
   }
 

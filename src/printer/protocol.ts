@@ -30,6 +30,22 @@ export const NOTIFY_CHAR_UUID = 0xff03;
 export const uuid16 = (n: number): string =>
   `0000${n.toString(16).padStart(4, '0')}-0000-1000-8000-00805f9b34fb`;
 
+/**
+ * Normalise any UUID spelling to the canonical 128-bit lowercase form.
+ *
+ * Implementations disagree: Chrome returns
+ * `0000ff00-0000-1000-8000-00805f9b34fb`, while Bluefy on iOS reports the same
+ * service as `FF00`. Comparing the raw strings makes a known service look
+ * unknown, which sends the characteristic search down its fallback path.
+ */
+export function canonicalUuid(u: string | number): string {
+  if (typeof u === 'number') return uuid16(u);
+  const s = u.trim().toLowerCase();
+  if (/^[0-9a-f]{1,4}$/.test(s)) return uuid16(parseInt(s, 16));
+  if (/^[0-9a-f]{8}$/.test(s)) return `${s}-0000-1000-8000-00805f9b34fb`;
+  return s;
+}
+
 export const SERVICE_UUID_STR = uuid16(SERVICE_UUID);
 export const WRITE_CHAR_UUID_STR = uuid16(WRITE_CHAR_UUID);
 export const NOTIFY_CHAR_UUID_STR = uuid16(NOTIFY_CHAR_UUID);
@@ -60,24 +76,24 @@ export const DEFAULT_DENSITY = 0x0f;
 export const DEFAULT_MEDIA = MEDIA_LABEL_WITH_GAPS;
 
 /**
- * GATT write size.
- *
- * 180 sits just under the 182-byte payload of the 185-byte ATT MTU that modern
- * phones negotiate, so each chunk is one ATT operation rather than a long
- * write. Fewer, larger writes means fewer round trips: the write count is what
- * dominates print time, not the byte count.
+ * GATT write size. 128 is the size the reference implementations use and the
+ * one this printer is known to accept. Larger chunks mean fewer round trips and
+ * a faster print, but the printer has to keep up — see CHUNK_DELAY_MS.
  */
-export const CHUNK_SIZE = 180;
+export const CHUNK_SIZE = 128;
 
 /**
- * Delay between chunks. Zero by default.
+ * Delay between chunks.
  *
- * A write-with-response already waits for the printer to acknowledge, which is
- * the flow control — an extra sleep on top just adds latency per chunk, and at
- * ~200 chunks a 20ms delay was costing about 6 seconds a label. Only raise this
- * if using write-without-response, where nothing paces the stream.
+ * This is the printer's flow control, and it cannot be removed.
+ *
+ * A write-with-response is acknowledged by the peripheral's BLE stack, NOT by
+ * the printer firmware — it confirms the bytes arrived, not that they were
+ * consumed. Streaming flat out therefore overruns the printer's own buffer: it
+ * drops raster data, then still executes the feed, so the motor runs and blank
+ * paper comes out. Lower this to go faster, but verify on paper.
  */
-export const CHUNK_DELAY_MS = 0;
+export const CHUNK_DELAY_MS = 20;
 
 /**
  * Largest safe write-without-response payload: the 23-byte default ATT MTU
@@ -108,6 +124,15 @@ export const SAFE_BLOCK_LINES = 256;
  * through the bottom of the label. 10mm at 8 px/mm.
  */
 export const DEFAULT_TEAR_FEED_PX = 80;
+
+/**
+ * Pause after connecting before the first job.
+ *
+ * The printer is not ready the instant the GATT connection resolves: notify has
+ * to be enabled and the firmware settles. Printing immediately can be accepted
+ * and then dropped, which looks like a feed with no image.
+ */
+export const CONNECT_SETTLE_MS = 400;
 
 /** Pause between blocks so the printer can drain its buffer. */
 export const BLOCK_DELAY_MS = 120;

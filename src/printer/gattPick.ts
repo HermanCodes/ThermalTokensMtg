@@ -7,7 +7,12 @@
  * the order the device lists things in, so the pair that actually printed is
  * remembered and tried first next time.
  */
-import { SERVICE_UUID_STR, WRITE_CHAR_UUID_STR, KNOWN_SERVICE_UUIDS } from './protocol';
+import {
+  SERVICE_UUID_STR,
+  WRITE_CHAR_UUID_STR,
+  KNOWN_SERVICE_UUIDS,
+  canonicalUuid,
+} from './protocol';
 
 export type MatchPath = 'documented' | 'remembered' | 'known-service' | 'brute-force';
 
@@ -47,7 +52,11 @@ export function loadRemembered(): GattPair | null {
  */
 export function saveRemembered(pair: GattPair): void {
   try {
-    localStorage.setItem(REMEMBERED_KEY, JSON.stringify(pair));
+    const canonical: GattPair = {
+      service: canonicalUuid(pair.service),
+      characteristic: canonicalUuid(pair.characteristic),
+    };
+    localStorage.setItem(REMEMBERED_KEY, JSON.stringify(canonical));
   } catch {
     // Private browsing or blocked storage — not worth failing a print over.
   }
@@ -61,7 +70,13 @@ export function forgetRemembered(): void {
   }
 }
 
-const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+/**
+ * Compare UUIDs by their canonical form.
+ *
+ * Bluefy reports `FF00` where Chrome reports the full 128-bit string, so a raw
+ * string compare made the documented service look unrecognised.
+ */
+const same = (a: string, b: string) => canonicalUuid(a) === canonicalUuid(b);
 
 /**
  * Pick a characteristic to write to, in descending order of confidence.

@@ -1,17 +1,6 @@
 import * as P from './protocol';
 import { sleep, type Transport } from './transport';
 
-/** Join byte arrays into one buffer. */
-function concat(...parts: Uint8Array[]): Uint8Array {
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let off = 0;
-  for (const p of parts) {
-    out.set(p, off);
-    off += p.length;
-  }
-  return out;
-}
-
 export * from './protocol';
 export type { Transport, ConnectOptions } from './transport';
 export { WebBluetoothTransport } from './webBluetooth';
@@ -100,9 +89,12 @@ export async function printRaster(
   const delay = opts.chunkDelayMs ?? P.CHUNK_DELAY_MS;
   const maxLines = Math.max(1, opts.maxBlockLines ?? P.MAX_BLOCK_LINES);
 
-  // One write instead of three: each round trip costs a BLE connection
-  // interval, and these are tiny.
-  await transport.write(concat(P.cmdSpeed(opts.speed), P.cmdDensity(opts.density), P.cmdMedia(opts.media)));
+  // Three discrete writes, not one coalesced buffer. The reference
+  // implementations send these separately and the printer expects it that way;
+  // batching them was enough to leave it feeding blank paper.
+  await transport.write(P.cmdSpeed(opts.speed));
+  await transport.write(P.cmdDensity(opts.density));
+  await transport.write(P.cmdMedia(opts.media));
 
   const blocks = Math.ceil(height / maxLines);
   let blockIndex = 0;

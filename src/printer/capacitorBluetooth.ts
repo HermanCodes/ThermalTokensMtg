@@ -3,7 +3,7 @@ import {
   type BleCharacteristic,
   type BleDevice,
 } from '@capacitor-community/bluetooth-le';
-import { SERVICE_UUID_STR, NOTIFY_CHAR_UUID_STR } from './protocol';
+import { SERVICE_UUID_STR, canonicalUuid } from './protocol';
 import {
   pickWritable,
   saveRemembered,
@@ -53,6 +53,8 @@ export class CapacitorBluetoothTransport implements Transport {
   gatt: GattEntry[] = [];
   matchPath?: MatchPath;
   notifications: string[] = [];
+  /** Whether notifications were enabled, and why not if they were not. */
+  notifyState = 'not attempted';
 
   /**
    * `without-response` skips the per-write acknowledgement. On iOS the MTU is
@@ -166,28 +168,39 @@ export class CapacitorBluetoothTransport implements Transport {
   }
 
   /**
-   * Subscribe to the notify characteristic if the chosen service has one.
-   * Some firmware only accepts raster data once notifications are enabled.
+   * Enable notifications on the chosen service.
+   *
+   * Some firmware only accepts raster data once notifications are on, so the
+   * outcome is recorded rather than swallowed — a silent failure here looks
+   * like the printer feeding blank paper.
    */
   private async subscribeNotify(): Promise<void> {
     this.notifications = [];
     if (!this.deviceId || !this.pair) return;
     const notify = this.gatt.find(
       (g) =>
-        g.service.toLowerCase() === this.pair!.service.toLowerCase() &&
-        g.characteristic.toLowerCase() !== this.pair!.characteristic.toLowerCase() &&
+        canonicalUuid(g.service) === canonicalUuid(this.pair!.service) &&
         /notify/.test(g.props),
     );
-    const uuid = notify?.characteristic ?? NOTIFY_CHAR_UUID_STR;
+    if (!notify) {
+      this.notifyState = 'no notify characteristic in this service';
+      return;
+    }
     try {
-      await BleClient.startNotifications(this.deviceId, this.pair.service, uuid, (value) => {
-        const hex = [...new Uint8Array(value.buffer)]
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join(' ');
-        this.notifications.push(hex);
-      });
-    } catch {
-      // Not fatal — plenty of units print without it.
+      await BleClient.startNotifications(
+        this.deviceId,
+        this.pair.service,
+        notify.characteristic,
+        (value) => {
+          const hex = [...new Uint8Array(value.buffer)]
+            .map((b) => b.toString(16).padStart(2, '0'))
+            .join(' ');
+          this.notifications.push(hex);
+        },
+      );
+      this.notifyState = `subscribed (${notify.characteristic})`;
+    } catch (e) {
+      this.notifyState = `FAILED: ${(e as Error)?.message ?? e}`;
     }
   }
 

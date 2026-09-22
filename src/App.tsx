@@ -28,6 +28,8 @@ import {
   PRINTER_WIDTH_PX,
   DEFAULT_DENSITY,
   CHUNK_SIZE,
+  CHUNK_DELAY_MS,
+  CONNECT_SETTLE_MS,
   MAX_BLOCK_LINES,
   MAX_WIDTH_MM,
   DEFAULT_TEAR_FEED_PX,
@@ -125,6 +127,7 @@ function friendlyBleError(e: unknown): string {
 interface Diagnosable {
   gatt: { service: string; characteristic: string; props: string; chosen: boolean }[];
   matchPath?: string;
+  notifyState: string;
   notifications: string[];
   writeMode: 'with-response' | 'without-response';
   isUncertain(): boolean;
@@ -300,6 +303,7 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [writeMode, setWriteMode] = useState<WriteMode>('with-response');
   const [chunkSize, setChunkSize] = useState(CHUNK_SIZE);
+  const [chunkDelay, setChunkDelay] = useState(CHUNK_DELAY_MS);
   const [maxBlockLines, setMaxBlockLines] = useState(MAX_BLOCK_LINES);
   const [tearMm, setTearMm] = useState(DEFAULT_TEAR_FEED_PX / 8);
   const [diag, setDiag] = useState<string[]>([]);
@@ -518,10 +522,15 @@ export default function App() {
         });
         setPrinterName(name);
 
+        // Give the firmware a moment: printing the instant GATT resolves can
+        // be accepted and then dropped.
+        await new Promise((r) => setTimeout(r, CONNECT_SETTLE_MS));
+
         if (d) {
           setDiag([
             `transport: ${t.name}`,
             `match: ${d.matchPath ?? 'none'}`,
+            `notify: ${d.notifyState}`,
             ...d.gatt.map(
               (g) => `${g.chosen ? '>> ' : '   '}${g.service} / ${g.characteristic} [${g.props}]`,
             ),
@@ -573,6 +582,7 @@ export default function App() {
       await printTestPattern(t, geometry.widthBytes, {
         density,
         chunkSize,
+        chunkDelayMs: chunkDelay,
         media,
         maxBlockLines,
         tearFeedPx: Math.round(tearMm * 8),
@@ -582,7 +592,7 @@ export default function App() {
     } catch (e) {
       setStatus({ kind: 'err', msg: (e as Error).message });
     }
-  }, [geometry, density, chunkSize, media, maxBlockLines, tearMm, writeMode]);
+  }, [geometry, density, chunkSize, chunkDelay, media, maxBlockLines, tearMm, writeMode]);
 
   const print = useCallback(async () => {
     if (!selected) return;
@@ -601,6 +611,7 @@ export default function App() {
         await printRaster(t, out.raster, out.height, geometry.widthBytes, {
           density,
           chunkSize,
+          chunkDelayMs: chunkDelay,
           media,
           maxBlockLines,
           tearFeedPx: Math.round(tearMm * 8),
@@ -623,7 +634,7 @@ export default function App() {
     } finally {
       setProgress(0);
     }
-  }, [selected, copies, geometry, renderRaster, density, chunkSize, media, maxBlockLines, tearMm, writeMode]);
+  }, [selected, copies, geometry, renderRaster, density, chunkSize, chunkDelay, media, maxBlockLines, tearMm, writeMode]);
 
   const busy = status.kind === 'busy';
   const open = (c: TokenCard) => {
@@ -1084,6 +1095,19 @@ export default function App() {
                   ]}
                   onChange={(v) => setWriteMode(v as WriteMode)}
                 />
+                <SliderRow
+                  label="Pacing"
+                  display={`${chunkDelay} ms`}
+                  value={chunkDelay}
+                  min={0}
+                  max={30}
+                  onChange={setChunkDelay}
+                />
+                <p className="footnote">
+                  Pacing is the printer's flow control: a Bluetooth write is acknowledged by
+                  the radio, not the printer, so sending flat out overruns its buffer and it
+                  feeds blank paper. Lower it to print faster, but check the result.
+                </p>
                 <SelectRow
                   label="Chunk size"
                   value={chunkSize}
