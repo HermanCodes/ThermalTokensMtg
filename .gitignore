@@ -11,3 +11,4 @@ ios/App/Pods/
 
 # Local scratch
 *.local
+.claude/
