@@ -78,7 +78,15 @@
   display: grid;
   /* Results and settings are fixed; the preview takes what is left. */
   grid-template-columns: 340px minmax(0, 1fr) 320px;
+  /*
+   * The row has to be capped, not merely allowed to shrink. An `auto` row sizes
+   * to its tallest item, so the settings column grew past the window the moment
+   * diagnostics was expanded, taking its own `overflow-y: auto` out of play and
+   * pushing the rest off the bottom of a viewport that cannot scroll.
+   */
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
+  overflow: hidden;
 }
 
 .desk .pane {
@@ -97,12 +105,25 @@
 .settings-pane {
   border-left: 1px solid #23232a;
   background: #101014;
+  /* Room to scroll past the last row rather than jamming it against the edge. */
+  padding-bottom: 28px;
+}
+
+/*
+ * Settings is a column of blocks that scrolls, not a layout that flexes. Left
+ * shrinkable, a long panel squeezes its own rows instead of overflowing, and
+ * then there is nothing for the scrollbar to scroll.
+ */
+.settings-pane > * {
+  flex: none;
 }
 
 /* A narrower window: drop the settings column below the preview. */
 @media (max-width: 1180px) {
   .desk .cols {
     grid-template-columns: 300px minmax(0, 1fr);
+    /* Both rows capped, so each pane scrolls inside its own share. */
+    grid-template-rows: minmax(0, 1.4fr) minmax(0, 1fr);
   }
 
   .settings-pane {
@@ -476,4 +497,40 @@
 
 .desk .textbtn {
   font-size: 13px;
+}
+
+/*
+ * Make the scrollbars visible. On a dark background the default overlay bar is
+ * almost invisible until you are already scrolling, which is no use when the
+ * question is whether there is anything further down at all.
+ */
+.desk .pane,
+.desk .dlist,
+.desk .paper {
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a46 transparent;
+}
+
+.desk .pane::-webkit-scrollbar,
+.desk .dlist::-webkit-scrollbar,
+.desk .paper::-webkit-scrollbar {
+  width: 10px;
+}
+
+.desk .pane::-webkit-scrollbar-thumb,
+.desk .dlist::-webkit-scrollbar-thumb,
+.desk .paper::-webkit-scrollbar-thumb {
+  background: #3a3a46;
+  border: 3px solid transparent;
+  border-radius: 6px;
+  background-clip: content-box;
+}
+
+.desk .pane::-webkit-scrollbar-thumb:hover {
+  background: #4d4d5c;
+  background-clip: content-box;
+}
+
+.printbar .split {
+  color: var(--tint);
 }

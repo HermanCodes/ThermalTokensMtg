@@ -48,8 +48,8 @@ export default function DesktopApp({
     chunkDelay, setChunkDelay, maxBlockLines, setMaxBlockLines,
     supported, diag, showDiag, setShowDiag,
     maxJobBytes, setMaxJobBytes,
-    printSpeedMm, setPrintSpeedMm,
-    connect, print, testPrint,
+    printSpeedMm, setPrintSpeedMm, splitPlan,
+    connect, print, testPrint, reset,
   } = api;
 
   const searchRef = useRef<HTMLInputElement>(null);
@@ -243,6 +243,11 @@ export default function DesktopApp({
           <div className="printbar">
             <span className="size">
               {printSize ? `${printSize.w.toFixed(0)} × ${printSize.h.toFixed(0)} mm` : '—'}
+              {splitPlan && splitPlan.parts > 1 && (
+                <span className="split" title="Too long for one job, so it is sent in parts">
+                  {' '}· {splitPlan.parts} parts
+                </span>
+              )}
             </span>
             <div className="spacer" />
             <span className="stepper">
@@ -411,6 +416,7 @@ export default function DesktopApp({
           <h2 className="grouphead">Advanced</h2>
           <div className="group">
             <Row label="Send test pattern" onClick={testPrint} />
+            <Row label="Clear printer" onClick={reset} />
             <Row
               label="Calibration strip"
               onClick={() => {

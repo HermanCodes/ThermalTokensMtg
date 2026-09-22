@@ -43,8 +43,8 @@ export default function PhoneApp({
     chunkDelay, setChunkDelay, maxBlockLines, setMaxBlockLines,
     supported, diag, showDiag, setShowDiag,
     maxJobBytes, setMaxJobBytes,
-    printSpeedMm, setPrintSpeedMm,
-    connect, print, testPrint,
+    printSpeedMm, setPrintSpeedMm, splitPlan,
+    connect, print, testPrint, reset,
     screen, setScreen, sheet, setSheet, open,
   } = api;
 
@@ -245,7 +245,10 @@ export default function PhoneApp({
             </div>
             <Row
               label="Paper used"
-              value={printSize ? `${printSize.w.toFixed(0)} × ${printSize.h.toFixed(0)} mm` : '—'}
+              value={
+                (printSize ? `${printSize.w.toFixed(0)} × ${printSize.h.toFixed(0)} mm` : '—') +
+                (splitPlan && splitPlan.parts > 1 ? ` · ${splitPlan.parts} parts` : '')
+              }
             />
             <Row label="Print options" onClick={() => setSheet(true)} />
           </div>
@@ -427,6 +430,7 @@ export default function PhoneApp({
           <h2 className="grouphead">Advanced</h2>
           <div className="group">
             <Row label="Send test pattern" onClick={testPrint} />
+            <Row label="Clear printer" onClick={reset} />
             <Row
               label="Calibration strip"
               onClick={() => {

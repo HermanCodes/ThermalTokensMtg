@@ -156,6 +156,18 @@ export const PRINT_LINES_PER_SEC = 100;
 /** Extra margin on top of a section's estimated print time. */
 export const SECTION_SETTLE_MS = 1200;
 
+/**
+ * Floor on the gap between two jobs, however short the first one was.
+ *
+ * The estimate covers the paper moving; this covers the rest — the firmware
+ * closing off a job, the gap sensor settling, the BLE stack draining its
+ * queue. None of that scales with the length of what was just printed.
+ */
+export const MIN_SECTION_GAP_MS = 3000;
+
+/** Pause after a reset before anything else is sent. */
+export const RESET_SETTLE_MS = 600;
+
 /** Conservative split size for images too long to send as one block. */
 export const SAFE_BLOCK_LINES = 256;
 /**
@@ -178,6 +190,16 @@ export const CONNECT_SETTLE_MS = 800;
 export const BLOCK_DELAY_MS = 120;
 
 const u16le = (v: number) => [v & 0xff, (v >> 8) & 0xff];
+
+/**
+ * ESC @ — the ESC/POS initialise, which every printer in that family answers
+ * by clearing its settings and its parser state.
+ *
+ * Only reaches the parser if the printer is sitting at a command boundary. Half
+ * way through a raster it counts as two more image bytes, which is why an
+ * abandoned raster is padded out to its promised length first.
+ */
+export const cmdInit = () => new Uint8Array([0x1b, 0x40]);
 
 export const cmdSpeed = (speed = DEFAULT_SPEED) =>
   new Uint8Array([0x1b, 0x4e, 0x0d, speed]);

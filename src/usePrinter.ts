@@ -31,6 +31,7 @@ import {
   printSectioned,
   planSections,
   printTestPattern,
+  resetPrinter,
   MAX_JOB_BYTES,
   PRINT_LINES_PER_SEC,
   mmToPx,
@@ -203,10 +204,18 @@ export function usePrinter() {
   const [diag, setDiag] = useState<string[]>([]);
   const [showDiag, setShowDiag] = useState(false);
   const [printSize, setPrintSize] = useState<{ w: number; h: number } | null>(null);
+  /** Divisions the current render vouched for — the same ones printing uses. */
+  const [renderSeams, setRenderSeams] = useState<number[] | undefined>(undefined);
 
   const renderCanvas = useRef<HTMLCanvasElement>(document.createElement('canvas'));
   const previewRef = useRef<HTMLCanvasElement>(null);
   const transportRef = useRef<Transport>(new WebBluetoothTransport());
+  /**
+   * Set when a print failed part-way, so the next one clears the printer first.
+   * A job abandoned mid-raster leaves the firmware counting bytes it never got,
+   * and everything after it comes out as somebody else's image.
+   */
+  const needsResetRef = useRef(false);
 
   const supported = transportAvailable();
 
@@ -395,10 +404,12 @@ export function usePrinter() {
     const out = renderRaster(copies > 1 ? `${copies}x` : undefined);
     if (!out) {
       setPrintSize(null);
+      setRenderSeams(undefined);
       return;
     }
     rasterToCanvas(out.raster, geometry.widthBytes, out.height, previewRef.current);
     setPrintSize({ w: geometry.widthPx / 8, h: out.height / 8 });
+    setRenderSeams('seams' in out ? (out as { seams?: number[] }).seams : undefined);
   }, [renderRaster, copies, geometry.widthBytes, geometry.widthPx, screen]);
 
   const connect = useCallback(
@@ -497,47 +508,54 @@ export function usePrinter() {
     }
     setStatus({ kind: 'busy', msg: 'Printing…' });
     const started = performance.now();
+    const tearFeedPx = Math.round(tearMm * 8);
+    let recovered = false;
     try {
       // Render once; every copy sends the same raster.
       const out = renderRaster();
       if (!out) throw new Error('Nothing to print yet — the card image is still loading');
-      let result: Awaited<ReturnType<typeof printSectioned>> | null = null;
-      for (let i = 0; i < copies; i++) {
-        result = await printSectioned(t, out.raster, out.height, geometry.widthBytes, {
-          maxJobBytes,
-          linesPerSecond: printSpeedMm * 8,
-          seams: 'seams' in out ? (out as { seams?: number[] }).seams : undefined,
-          density,
-          chunkSize,
-          chunkDelayMs: chunkDelay,
-          media,
-          maxBlockLines,
-          tearFeedPx: Math.round(tearMm * 8),
-          unacknowledged: writeMode === 'without-response',
-          onProgress: (f) => setProgress((i + f) / copies),
-        });
+
+      // Clear whatever the last failure left behind, before adding to it.
+      if (needsResetRef.current) {
+        await resetPrinter(t);
+        needsResetRef.current = false;
+        recovered = true;
       }
+
+      const result = await printSectioned(t, out.raster, out.height, geometry.widthBytes, {
+        maxJobBytes,
+        copies,
+        linesPerSecond: printSpeedMm * 8,
+        seams: 'seams' in out ? (out as { seams?: number[] }).seams : undefined,
+        density,
+        chunkSize,
+        chunkDelayMs: chunkDelay,
+        media,
+        maxBlockLines,
+        tearFeedPx,
+        unacknowledged: writeMode === 'without-response',
+        onProgress: setProgress,
+      });
       // Only now is the chosen characteristic proven, so it is safe to reuse.
       asDiagnosable(t)?.confirmWorking();
       const secs = ((performance.now() - started) / 1000).toFixed(1);
-      const plan = planSections(out.height, geometry.widthBytes, {
-        maxBytes: maxJobBytes,
-        seams: 'seams' in out ? (out as { seams?: number[] }).seams : undefined,
-        raster: out.raster,
-        widthBytes: geometry.widthBytes,
-      });
-      const parts = plan.sections.length;
-      if (parts > 1 && result) {
-        const r = result;
-        const replies = asDiagnosable(t)?.notifications.length ?? 0;
-        setDiag((d) => [
-          `last print: ${parts} sections, cuts ${r.cutReasons.join('+')},` +
-            ` waits ${r.waitsMs.map((w: number) => `${(w / 1000).toFixed(1)}s`).join('+')}`,
-          `printer replied ${replies} time(s)`,
-          ...d.filter((l) => !l.startsWith('last print:') && !l.startsWith('printer replied')),
-        ]);
-      }
-      const inSections = parts > 1 ? `, in ${parts} sections` : '';
+
+      const parts = result.sections;
+      const replies = asDiagnosable(t)?.notifications.length ?? 0;
+      const kb = (b: number) => `${(b / 1024).toFixed(1)}KB`;
+      setDiag((d) => [
+        `last print: ${parts} job${parts === 1 ? '' : 's'} × ${result.copies} cop${result.copies === 1 ? 'y' : 'ies'}` +
+          ` — ${result.bytesPerSection.map(kb).join(' + ')} (limit ${kb(maxJobBytes)})` +
+          (result.cutReasons.length ? `, cut at ${result.cutReasons.join(' + ')}` : '') +
+          (result.waitsMs.length
+            ? `, waited ${result.waitsMs.map((w) => `${(w / 1000).toFixed(1)}s`).join(' + ')}`
+            : '') +
+          (recovered ? ', after a reset' : ''),
+        `printer replied ${replies} time(s)`,
+        ...d.filter((l) => !l.startsWith('last print:') && !l.startsWith('printer replied')),
+      ]);
+
+      const inSections = parts > 1 ? `, in ${parts} parts` : '';
       setStatus({
         kind: 'ok',
         msg:
@@ -546,11 +564,52 @@ export function usePrinter() {
             : `Printed ${selected.name} in ${secs}s${inSections}`,
       });
     } catch (e) {
-      setStatus({ kind: 'err', msg: (e as Error).message });
+      // The printer may now be half-way through a raster it will never receive.
+      // Say so, and clear it before the next attempt rather than printing on top.
+      needsResetRef.current = true;
+      setStatus({
+        kind: 'err',
+        msg: `${(e as Error).message} The printer will be cleared before the next print.`,
+      });
     } finally {
       setProgress(0);
     }
   }, [selected, copies, geometry, renderRaster, density, chunkSize, chunkDelay, media, maxBlockLines, tearMm, writeMode, maxJobBytes, printSpeedMm]);
+
+  /** Manual escape hatch for a printer that is still producing nonsense. */
+  const reset = useCallback(async () => {
+    const t = transportRef.current;
+    if (!t.isConnected()) {
+      setStatus({ kind: 'err', msg: 'Connect a printer first' });
+      return;
+    }
+    setStatus({ kind: 'busy', msg: 'Clearing the printer…' });
+    try {
+      await resetPrinter(t);
+      needsResetRef.current = false;
+      setStatus({
+        kind: 'ok',
+        msg: 'Printer cleared. If prints are still garbled, power it off and on.',
+      });
+    } catch (e) {
+      setStatus({ kind: 'err', msg: (e as Error).message });
+    }
+  }, []);
+
+  /**
+   * How the current label will be divided, so the preview can say so before
+   * anything is sent rather than after it has gone wrong.
+   */
+  const splitPlan = useMemo(() => {
+    if (!printSize) return null;
+    const lines = Math.round(printSize.h * 8);
+    const plan = planSections(lines, geometry.widthBytes, {
+      maxBytes: maxJobBytes,
+      seams: renderSeams,
+      tearLines: Math.round(tearMm * 8),
+    });
+    return { parts: plan.sections.length, bytes: plan.bytesPerSection };
+  }, [printSize, renderSeams, geometry.widthBytes, maxJobBytes, tearMm]);
 
   const busy = status.kind === 'busy';
   const open = (c: TokenCard) => {
@@ -583,8 +642,8 @@ export function usePrinter() {
     chunkDelay, setChunkDelay, maxBlockLines, setMaxBlockLines,
     supported, diag, showDiag, setShowDiag,
     maxJobBytes, setMaxJobBytes,
-    printSpeedMm, setPrintSpeedMm,
-    connect, print, testPrint,
+    printSpeedMm, setPrintSpeedMm, splitPlan,
+    connect, print, testPrint, reset,
     // navigation (the phone view uses these; desktop shows everything at once)
     screen, setScreen, sheet, setSheet, open,
   };
