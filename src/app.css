@@ -795,3 +795,13 @@ textarea {
   word-break: break-all;
   color: var(--label-2);
 }
+
+/* Scope switch sits above the search field. */
+.segmented.scope {
+  margin: 0 0 12px;
+}
+
+.badge.loyalty {
+  color: #0a0a0c;
+  background: var(--tint);
+}

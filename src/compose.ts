@@ -91,6 +91,8 @@ export interface CombinedOptions {
   threshold?: number;
   /** Rule thickness between the card and the text. 0 to omit. */
   dividerPx?: number;
+  /** Print a TOKEN tag on the text block. */
+  tokenMarker?: boolean;
 }
 
 /**
@@ -113,11 +115,14 @@ export function buildCombinedLabel(
     clahe,
     threshold = 128,
     dividerPx = 2,
+    tokenMarker = false,
   } = opts;
 
   const W = widthBytes * 8;
   const textH =
-    textHeightPx === 'auto' ? naturalWideHeight(token, W) : textHeightPx;
+    textHeightPx === 'auto'
+      ? naturalWideHeight(token, W, { tokenMarker })
+      : textHeightPx;
   const cardH = opts.cardHeightPx ?? Math.round((W * img.height) / img.width);
   const gap = Math.max(0, dividerPx) + (dividerPx > 0 ? 6 : 0);
   const height = cardH + gap + textH;
@@ -160,6 +165,7 @@ export function buildCombinedLabel(
     heightPx: textH,
     showArt: false,
     layout: 'wide',
+    tokenMarker,
   });
   blit(
     out,

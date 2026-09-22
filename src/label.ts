@@ -6,7 +6,7 @@
  * the label is a purpose-built typographic layout and the art is opt-in.
  */
 import type { TokenCard } from './scryfall';
-import { ptLabel } from './scryfall';
+import { statLabel } from './scryfall';
 
 const SANS = "'Arial Narrow', 'Helvetica Neue', Helvetica, Arial, sans-serif";
 
@@ -22,6 +22,11 @@ export interface LabelOptions {
   /** Extra copies indicator, e.g. "3x" — purely cosmetic. */
   cornerNote?: string;
   /**
+   * Print a "TOKEN" tag. Set for ordinary cards printed as token copies, so a
+   * thermal proxy of a real card is never mistaken for the card itself.
+   */
+  tokenMarker?: boolean;
+  /**
    * `tall` stacks everything with the P/T bottom-right. `wide` moves the P/T
    * into a right-hand column, which is the only way a short, wide block fits a
    * name, type line and rules text without crushing them. `auto` picks by
@@ -30,9 +35,16 @@ export interface LabelOptions {
   layout?: 'auto' | 'tall' | 'wide';
 }
 
-/** Mana/tap symbols like {T} or {1} are unreadable as braces at this size. */
+/**
+ * Normalise mana and tap symbols.
+ *
+ * Braces are kept: `{T}: Add {G}` is the form every player reads fluently, and
+ * stripping them turned ability costs like `{2}{R}` into "2R", which is worse
+ * the moment real cards are in scope rather than just tokens. Multi-character
+ * symbols are uppercased for consistency.
+ */
 function flattenSymbols(text: string): string {
-  return text.replace(/\{([^}]+)\}/g, (_, s: string) => s.toUpperCase());
+  return text.replace(/\{([^}]+)\}/g, (_, s: string) => `{${s.toUpperCase()}}`);
 }
 
 /** "Token Creature — Goblin Rogue" -> "Creature — Goblin Rogue" */
@@ -87,6 +99,30 @@ function fit(
   ctx.font = `${weight} ${to}px ${SANS}`;
   return { size: to, lines: wrap(ctx, text, maxWidth).slice(0, maxLines) };
 }
+/** Height of the TOKEN tag at a given print width. */
+function markerH(W: number): number {
+  return Math.round(W * 0.062);
+}
+
+/**
+ * A solid bar with knocked-out text, bottom-left.
+ *
+ * Reversed out rather than set in plain type because it has to be unmistakable
+ * at a glance: this label represents a token, not the card it was printed from.
+ */
+function drawMarker(ctx: CanvasRenderingContext2D, W: number, y: number, pad: number): void {
+  const h = markerH(W);
+  const size = Math.round(h * 0.72);
+  ctx.font = `bold ${size}px ${SANS}`;
+  const text = 'TOKEN';
+  const w = Math.ceil(ctx.measureText(text).width) + Math.round(h * 0.8);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(pad, y, w, h);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(text, pad + Math.round(h * 0.4), y + Math.round((h - size) / 2));
+  ctx.fillStyle = '#000';
+}
+
 /** Above this width:height ratio, the stacked layout runs out of vertical room. */
 const WIDE_ASPECT = 1.7;
 
@@ -149,7 +185,7 @@ function drawTall(
   }
 
   // --- P/T block (reserved first: it anchors the bottom-right) -------------
-  const pt = ptLabel(token);
+  const pt = statLabel(token)?.text;
   let ptWidth = 0;
   let ptSize = 0;
   if (pt) {
@@ -248,6 +284,7 @@ interface WideLayout {
   ptSize: number;
   ptWidth: number;
   pt?: string;
+  statKind: 'pt' | 'loyalty';
   name: { size: number; lines: string[] };
   type: { size: number; lines: string[] } | null;
   oracle: { size: number; lines: string[] } | null;
@@ -269,8 +306,9 @@ function layoutWide(token: TokenCard, W: number, opts: LabelOptions): WideLayout
   canvas.height = 8;
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
 
-  // --- P/T, sized to the band ---------------------------------------------
-  const pt = ptLabel(token);
+  // --- P/T or loyalty, sized to the band ----------------------------------
+  const stat = statLabel(token);
+  const pt = stat?.text;
   let ptSize = 0;
   let ptWidth = 0;
   if (pt) {
@@ -324,9 +362,21 @@ function layoutWide(token: TokenCard, W: number, opts: LabelOptions): WideLayout
     height += Math.round(S.pad * 0.7) + 2 + Math.round(S.pad * 0.7);
     height += oracle.lines.length * Math.round(oracle.size * 1.22);
   }
+  if (opts.tokenMarker) height += Math.round(S.pad * 0.5) + markerH(W);
   height += S.pad;
 
-  return { height, pad: S.pad, bandH, ptSize, ptWidth, pt, name, type, oracle };
+  return {
+    height,
+    pad: S.pad,
+    bandH,
+    ptSize,
+    ptWidth,
+    pt,
+    statKind: stat?.kind ?? 'pt',
+    name,
+    type,
+    oracle,
+  };
 }
 
 /**
@@ -380,10 +430,25 @@ function drawWide(
     }
   }
 
-  // --- P/T, top-right of the band ----------------------------------------
+  // --- P/T or loyalty, top-right of the band ------------------------------
   if (L.pt) {
     ctx.font = `bold ${L.ptSize}px ${SANS}`;
-    ctx.fillText(L.pt, W - pad - L.ptWidth, pad);
+    const x = W - pad - L.ptWidth;
+    if (L.statKind === 'loyalty') {
+      // Box it so a bare number reads as loyalty rather than a power value.
+      const padX = Math.round(L.ptSize * 0.18);
+      ctx.fillRect(
+        x - padX,
+        pad - Math.round(padX * 0.5),
+        L.ptWidth + padX * 2,
+        Math.round(L.ptSize * 1.15),
+      );
+      ctx.fillStyle = '#fff';
+      ctx.fillText(L.pt, x, pad);
+      ctx.fillStyle = '#000';
+    } else {
+      ctx.fillText(L.pt, x, pad);
+    }
   }
 
   // --- rules text, spanning the full width -------------------------------
@@ -402,10 +467,15 @@ function drawWide(
     }
   }
 
+  if (opts.tokenMarker) {
+    drawMarker(ctx, W, H - pad - markerH(W), pad);
+  }
+
   if (opts.cornerNote) {
     const nSize = Math.round(W * 0.04);
     ctx.font = `bold ${nSize}px ${SANS}`;
-    ctx.fillText(opts.cornerNote, pad, H - pad - nSize);
+    const w = ctx.measureText(opts.cornerNote).width;
+    ctx.fillText(opts.cornerNote, W - pad - w, H - pad - nSize);
   }
 }
 

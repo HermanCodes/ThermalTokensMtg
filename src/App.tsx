@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { searchTokens, ptLabel, type TokenCard } from './scryfall';
+import { searchCards, statLabel, type TokenCard, type SearchScope } from './scryfall';
 import { drawLabel, drawCard, loadArt, type CardFit } from './label';
 import {
   canvasToRaster,
@@ -240,6 +240,8 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<TokenCard[]>([]);
   const [searching, setSearching] = useState(false);
+  const [scope, setScope] = useState<SearchScope>('tokens');
+  const [markTokens, setMarkTokens] = useState(true);
   const [selected, setSelected] = useState<TokenCard | null>(null);
   const [art, setArt] = useState<HTMLImageElement | null>(null);
 
@@ -366,7 +368,7 @@ export default function App() {
     const t = setTimeout(async () => {
       setSearching(true);
       try {
-        setResults(await searchTokens(query, ac.signal));
+        setResults(await searchCards(query, { scope, signal: ac.signal }));
       } catch (e) {
         if ((e as Error).name !== 'AbortError') {
           setStatus({ kind: 'err', msg: (e as Error).message });
@@ -379,7 +381,7 @@ export default function App() {
       clearTimeout(t);
       ac.abort();
     };
-  }, [query]);
+  }, [query, scope]);
 
   // --- load art for the selected token --------------------------------------
   useEffect(() => {
@@ -426,6 +428,7 @@ export default function App() {
         if (!art) return null;
         return buildCombinedLabel(art, selected, {
           widthBytes: geometry.widthBytes,
+          tokenMarker: markTokens && !selected.isToken,
           cardHeightPx: cardMm > 0 ? Math.round(cardMm * 8) : undefined,
           textHeightPx: autoTextBlock ? 'auto' : Math.round(textBlockMm * 8),
           dither,
@@ -451,6 +454,7 @@ export default function App() {
             heightPx: geometry.heightPx,
             showArt,
             cornerNote: note,
+            tokenMarker: markTokens && !selected.isToken,
           },
           art,
         );
@@ -463,7 +467,7 @@ export default function App() {
         clahe,
       });
     },
-    [selected, mode, art, cardFit, geometry, showArt, dither, threshold, brightness, contrast, clahe, sweepBright, sweepContrast, cellH, calibLayout, calibContent, textBlockMm, autoTextBlock, cardMm],
+    [selected, mode, art, cardFit, geometry, showArt, dither, threshold, brightness, contrast, clahe, sweepBright, sweepContrast, cellH, calibLayout, calibContent, textBlockMm, autoTextBlock, cardMm, markTokens],
   );
 
   // Preview shows the packed 1bpp raster, not the greyscale canvas.
@@ -611,12 +615,24 @@ export default function App() {
         <div className="scroll">
           <h1 className="largetitle">Tokens</h1>
 
+          <div className="segmented scope">
+            <button
+              className={scope === 'tokens' ? 'on' : ''}
+              onClick={() => setScope('tokens')}
+            >
+              Tokens
+            </button>
+            <button className={scope === 'cards' ? 'on' : ''} onClick={() => setScope('cards')}>
+              All cards
+            </button>
+          </div>
+
           <div className="searchwrap">
             <div className="searchbar">
               <Icon.Search />
               <input
                 value={query}
-                placeholder="Goblin, Treasure, Angel…"
+                placeholder={scope === 'tokens' ? 'Goblin, Treasure, Angel…' : 'Llanowar Elves, Teferi…'}
                 onChange={(e) => setQuery(e.target.value)}
               />
               {query && (
@@ -710,7 +726,11 @@ export default function App() {
                       <span className="card-set">{c.setName}</span>
                     </span>
                     <span className="row-trail">
-                      {ptLabel(c) && <span className="badge">{ptLabel(c)}</span>}
+                      {statLabel(c) && (
+                        <span className={`badge${statLabel(c)!.kind === 'loyalty' ? ' loyalty' : ''}`}>
+                          {statLabel(c)!.text}
+                        </span>
+                      )}
                       <Icon.ChevronRight />
                     </span>
                   </button>
@@ -875,6 +895,13 @@ export default function App() {
                 min={14}
                 max={45}
                 onChange={setTextBlockMm}
+              />
+            )}
+            {selected && !selected.isToken && (
+              <SwitchRow
+                label="Mark as TOKEN"
+                checked={markTokens}
+                onChange={setMarkTokens}
               />
             )}
             {mode === 'both' && (
