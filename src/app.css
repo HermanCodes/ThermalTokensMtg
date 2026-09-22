@@ -47,16 +47,18 @@ body {
   background: var(--bg);
 }
 
-/* On a desktop browser, present it in a phone-shaped frame instead of
-   stretching a phone layout across a monitor. */
+/* When the phone layout is shown on a big screen — someone chose it, or the
+   window is wide but the pointer is coarse — present it in a phone-shaped frame
+   rather than stretching a thumb-sized layout across a monitor. Scoped to
+   :has(.ios) so the desktop layout is never boxed in. */
 @media (min-width: 720px) {
-  body {
+  body:has(.ios) {
     display: grid;
     place-items: center;
     background: #0a0a0c;
   }
 
-  #root {
+  body:has(.ios) #root {
     height: auto;
   }
 

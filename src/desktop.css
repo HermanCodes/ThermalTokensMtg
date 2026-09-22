@@ -1,0 +1,479 @@
+/**
+ * Desktop interface.
+ *
+ * Reuses the colour tokens and the grouped-row widgets from app.css, but lays
+ * them out in three columns and tightens the metrics: iOS row heights and type
+ * sizes are built for thumbs and read as oversized with a mouse.
+ */
+
+.desk {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #0d0d10;
+  font-size: 14px;
+}
+
+/* --- top bar ------------------------------------------------------------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #23232a;
+  background: #141418;
+  flex: none;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.topbar .conn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--label-2);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #2f2f38;
+  border-radius: 7px;
+  background: #1e1e24;
+  color: var(--label);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: #454552;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn.ghost {
+  background: transparent;
+  color: var(--label-2);
+}
+
+/* --- three columns ------------------------------------------------------- */
+.desk .cols {
+  flex: 1;
+  display: grid;
+  /* Results and settings are fixed; the preview takes what is left. */
+  grid-template-columns: 340px minmax(0, 1fr) 320px;
+  min-height: 0;
+}
+
+.desk .pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.results-pane {
+  border-right: 1px solid #23232a;
+}
+
+.settings-pane {
+  border-left: 1px solid #23232a;
+  background: #101014;
+}
+
+/* A narrower window: drop the settings column below the preview. */
+@media (max-width: 1180px) {
+  .desk .cols {
+    grid-template-columns: 300px minmax(0, 1fr);
+  }
+
+  .settings-pane {
+    grid-column: 1 / -1;
+    border-left: none;
+    border-top: 1px solid #23232a;
+  }
+}
+
+/* --- search + results --------------------------------------------------- */
+.desk .segmented {
+  margin-bottom: 10px;
+}
+
+.desk .segmented button {
+  font-size: 12.5px;
+  padding: 6px 4px;
+}
+
+.desk .searchbar {
+  height: 34px;
+  border-radius: 8px;
+  flex: none;
+}
+
+.desk .searchbar input {
+  font-size: 14px;
+}
+
+.desk .chips {
+  margin: 8px 0 0;
+  padding: 0 0 8px;
+  flex: none;
+}
+
+.desk .chip {
+  font-size: 12.5px;
+  padding: 5px 11px;
+}
+
+.desk .hint {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 2px 0 8px;
+  font-size: 12px;
+  color: var(--label-3);
+  flex: none;
+}
+
+.desk .hint.pad {
+  padding: 16px 4px;
+  justify-content: center;
+}
+
+.desk .hint.tint {
+  color: var(--tint);
+}
+
+.desk .hint.mono {
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  display: block;
+}
+
+.keys {
+  margin-left: auto;
+  font-size: 11px;
+  color: #55555f;
+  white-space: nowrap;
+}
+
+.dlist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.drow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: var(--label);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.drow:hover {
+  background: #17171c;
+}
+
+.drow.sel {
+  background: #241f16;
+  border-color: var(--tint);
+}
+
+.drow img,
+.drow .thumb-none {
+  width: 30px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 3px;
+  flex: none;
+  background: var(--fill);
+}
+
+.drow-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.drow-name {
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drow-type,
+.drow-set {
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drow-type {
+  color: var(--label-2);
+}
+
+.drow-set {
+  color: var(--label-3);
+}
+
+.desk .badge {
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+/* --- preview ------------------------------------------------------------- */
+.preview-pane {
+  align-items: stretch;
+  padding: 12px 20px;
+}
+
+.paper-wrap {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 12px 0;
+}
+
+.desk .paper {
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px;
+  /* Show the label at a readable size without letting a long strip take over. */
+  width: min(320px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+}
+
+.desk .paper canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+}
+
+.desk .empty {
+  color: #55555f;
+  font-size: 14px;
+}
+
+.printbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.printbar .size {
+  font-size: 12.5px;
+  color: var(--label-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.desk .primary {
+  border: none;
+  border-radius: 8px;
+  background: var(--tint);
+  color: #1a1002;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 9px 22px;
+  cursor: pointer;
+}
+
+.desk .primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.desk .primary:disabled {
+  background: #26262d;
+  color: #55555f;
+  cursor: not-allowed;
+}
+
+.desk .stepper {
+  background: #1e1e24;
+  border: 1px solid #2f2f38;
+  border-radius: 7px;
+}
+
+.desk .stepper button {
+  width: 30px;
+  height: 28px;
+  font-size: 16px;
+}
+
+.desk .status {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  min-height: 1.2em;
+  flex: none;
+}
+
+/* --- banners ------------------------------------------------------------- */
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 16px 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  flex: none;
+}
+
+.banner.err {
+  background: #3a1f1d;
+  border: 1px solid #6b2b26;
+  color: #ffb4ae;
+}
+
+.banner.tint {
+  margin: 0 0 10px;
+  background: rgba(255, 159, 10, 0.14);
+  color: var(--tint);
+}
+
+.banner code {
+  background: #0006;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* --- settings: tighten the iOS row metrics for a mouse ------------------ */
+.desk .grouphead {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.desk .grouphead:first-child {
+  margin-top: 0;
+}
+
+.desk .group {
+  background: #17171c;
+  border: 1px solid #23232a;
+  border-radius: 8px;
+}
+
+.desk .row {
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.desk .row.slider {
+  gap: 0;
+}
+
+.desk .row .row-label {
+  font-size: 12.5px;
+}
+
+.desk .row.slider .row-label {
+  font-size: 11.5px;
+}
+
+.desk .row-value {
+  font-size: 12.5px;
+}
+
+.desk .row select {
+  font-size: 12.5px;
+  max-width: 150px;
+}
+
+.desk .row input[type='range'] {
+  height: 20px;
+}
+
+.desk .row input[type='range']::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+}
+
+.desk .row input[type='range']::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+}
+
+.desk .row input[type='text'] {
+  font-size: 12.5px;
+  padding: 6px 8px;
+}
+
+/* A smaller switch reads better next to 13px rows. */
+.desk .switch {
+  width: 38px;
+  height: 23px;
+}
+
+.desk .switch > span::after {
+  width: 19px;
+  height: 19px;
+}
+
+.desk .switch input:checked + span::after {
+  transform: translateX(15px);
+}
+
+.desk .row.tappable:hover {
+  background: #1d1d23;
+}
+
+.desk pre {
+  margin: 6px 0 0;
+  padding: 9px;
+  background: #08080a;
+  border: 1px solid #23232a;
+  border-radius: 7px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--label-2);
+}
+
+.desk .textbtn {
+  font-size: 13px;
+}
