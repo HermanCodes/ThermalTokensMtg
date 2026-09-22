@@ -101,7 +101,7 @@ export default function DesktopApp({
           <span className={`dot ${printerName ? 'on' : ''}`} />
           {printerName ?? 'Not connected'}
         </span>
-        <button className="btn" onClick={() => connect(false)} disabled={!supported || busy}>
+        <button className="btn" onClick={() => connect()} disabled={!supported || busy}>
           <Icon.Bluetooth />
           {printerName ? 'Reconnect' : 'Connect printer'}
         </button>
@@ -109,6 +109,15 @@ export default function DesktopApp({
           Phone view
         </button>
       </header>
+
+      {status.kind === 'err' && (
+        <div className="banner err">
+          <span>{status.msg}</span>
+          <button className="btn" onClick={() => connect()} disabled={busy}>
+            Try again
+          </button>
+        </div>
+      )}
 
       {!supported && (
         <p className="banner err">
@@ -252,7 +261,9 @@ export default function DesktopApp({
             </button>
           </div>
 
-          <p className={`status ${status.kind}`}>{status.msg || ' '}</p>
+          <p className={`status ${status.kind}`}>
+            {status.kind === 'err' ? ' ' : status.msg || ' '}
+          </p>
         </section>
 
         {/* ---------------- settings ---------------- */}
@@ -545,7 +556,7 @@ export default function DesktopApp({
                   ]}
                   onChange={(v) => setMaxBlockLines(Number(v))}
                 />
-                <Row label="Show all devices" onClick={() => connect(true)} />
+                <Row label="Only Phomemo devices" onClick={() => connect(true)} />
               </div>
               <p className="hint mono">
                 {geometry.widthPx} dots · {geometry.widthBytes} bytes/line

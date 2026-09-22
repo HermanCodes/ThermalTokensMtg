@@ -396,14 +396,14 @@ export function usePrinter() {
   }, [renderRaster, copies, geometry.widthBytes, geometry.widthPx, screen]);
 
   const connect = useCallback(
-    async (allDevices = false) => {
+    async (onlyKnownPrinters = false) => {
       setStatus({ kind: 'busy', msg: 'Looking for your printer…' });
       // Already chosen on mount — no await before requestDevice.
       const t = transportRef.current;
       const d = asDiagnosable(t);
       if (d) d.writeMode = writeMode;
       try {
-        const name = await t.connect({ allDevices });
+        const name = await t.connect({ onlyKnownPrinters });
         t.onDisconnect(() => {
           setPrinterName(null);
           setStatus({ kind: 'err', msg: 'Printer disconnected' });

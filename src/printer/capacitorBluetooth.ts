@@ -94,7 +94,7 @@ export class CapacitorBluetoothTransport implements Transport {
     let device: BleDevice;
     try {
       device = await BleClient.requestDevice(
-        opts.allDevices === false ? { services: [SERVICE_UUID_STR] } : {},
+        opts.onlyKnownPrinters ? { services: [SERVICE_UUID_STR] } : {},
       );
     } catch (e) {
       throw new Error(

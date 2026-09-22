@@ -7,8 +7,15 @@
  * without touching the protocol, renderer or UI.
  */
 export interface ConnectOptions {
-  /** Show every nearby BLE device instead of filtering on Phomemo UUIDs/names. */
-  allDevices?: boolean;
+  /**
+   * Restrict the chooser to devices advertising a known Phomemo service or
+   * name. Off by default, and deliberately so: these printers commonly
+   * advertise neither — the service is only visible after connecting — so
+   * filtering presents an empty chooser and looks like "no devices found".
+   * The chooser is a picker the user reads anyway, so showing everything is
+   * strictly more likely to work.
+   */
+  onlyKnownPrinters?: boolean;
 }
 
 export interface Transport {

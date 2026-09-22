@@ -99,14 +99,14 @@ export default function PhoneApp({
                 <span className="row-label">
                   <span className="dot on" /> {printerName}
                 </span>
-                <button className="textbtn" onClick={() => connect(false)}>
+                <button className="textbtn" onClick={() => connect()}>
                   Reconnect
                 </button>
               </div>
             ) : (
               <button
                 className="row tappable"
-                onClick={() => connect(false)}
+                onClick={() => connect()}
                 disabled={!supported || busy}
               >
                 <span className="row-label accent">
@@ -131,8 +131,8 @@ export default function PhoneApp({
 
           {status.kind === 'err' && screen === 'search' && (
             <div className="group">
-              <button className="row tappable" onClick={() => connect(true)} disabled={busy}>
-                <span className="row-label accent">Search all Bluetooth devices</span>
+              <button className="row tappable" onClick={() => connect()} disabled={busy}>
+                <span className="row-label accent">Try again</span>
                 <Icon.ChevronRight />
               </button>
             </div>
@@ -533,7 +533,7 @@ export default function PhoneApp({
                   ]}
                   onChange={(v) => setMaxBlockLines(Number(v))}
                 />
-                <Row label="Show all devices" onClick={() => connect(true)} />
+                <Row label="Only Phomemo devices" onClick={() => connect(true)} />
               </div>
               {mode === 'calib' && (
                 <div className="group">

@@ -72,13 +72,13 @@ export class WebBluetoothTransport implements Transport {
       );
     }
 
-    // Filtering hides printers that don't advertise their service UUID in the
-    // advertising packet (common — the service is often only visible after
-    // connecting). `allDevices` shows everything nearby instead.
+    // Unfiltered by default: this printer advertises neither the ff00 service
+    // nor an M110-ish name, so a filtered chooser comes up empty. Chrome shows
+    // a native picker listing device names either way, so the only cost of
+    // showing everything is a longer list.
     this.device = await navigator.bluetooth.requestDevice(
-      opts.allDevices
-        ? { acceptAllDevices: true, optionalServices: [SERVICE_UUID_STR, ...KNOWN_SERVICE_UUIDS] }
-        : {
+      opts.onlyKnownPrinters
+        ? {
             filters: [
               { services: [SERVICE_UUID_STR] },
               { namePrefix: 'M110' },
@@ -86,6 +86,10 @@ export class WebBluetoothTransport implements Transport {
               { namePrefix: 'M220' },
               { namePrefix: 'M200' },
             ],
+            optionalServices: [SERVICE_UUID_STR, ...KNOWN_SERVICE_UUIDS],
+          }
+        : {
+            acceptAllDevices: true,
             optionalServices: [SERVICE_UUID_STR, ...KNOWN_SERVICE_UUIDS],
           },
     );
