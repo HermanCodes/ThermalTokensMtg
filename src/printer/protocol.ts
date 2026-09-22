@@ -76,24 +76,31 @@ export const DEFAULT_DENSITY = 0x0f;
 export const DEFAULT_MEDIA = MEDIA_LABEL_WITH_GAPS;
 
 /**
- * GATT write size. 128 is the size the reference implementations use and the
- * one this printer is known to accept. Larger chunks mean fewer round trips and
- * a faster print, but the printer has to keep up — see CHUNK_DELAY_MS.
+ * GATT write size.
+ *
+ * 180 sits just under the 182-byte payload of the 185-byte ATT MTU that modern
+ * phones negotiate, so each chunk is one ATT operation rather than a long
+ * write. Write count, not byte count, dominates print time — this is roughly a
+ * third fewer round trips than the 128 the reference implementations use, and
+ * verified on hardware.
  */
-export const CHUNK_SIZE = 128;
+export const CHUNK_SIZE = 180;
 
 /**
- * Delay between chunks.
+ * Delay between chunks. Zero, because none is needed.
  *
- * This is the printer's flow control, and it cannot be removed.
+ * Blank feeds were once blamed on sending too fast, but the real cause was
+ * notifications never being enabled: the lookup threw on a UUID spelling and
+ * the error was swallowed, and this firmware will not accept raster data until
+ * notify is on. With notify subscribed, the printer keeps up at 180 bytes with
+ * no pacing at all — measured on hardware.
  *
- * A write-with-response is acknowledged by the peripheral's BLE stack, NOT by
- * the printer firmware — it confirms the bytes arrived, not that they were
- * consumed. Streaming flat out therefore overruns the printer's own buffer: it
- * drops raster data, then still executes the feed, so the motor runs and blank
- * paper comes out. Lower this to go faster, but verify on paper.
+ * Worth knowing if it ever does fall behind: a write-with-response is
+ * acknowledged by the peripheral's BLE stack, not by the printer firmware, so
+ * it confirms delivery rather than consumption and is not by itself flow
+ * control. The Pacing control exists for that case.
  */
-export const CHUNK_DELAY_MS = 20;
+export const CHUNK_DELAY_MS = 0;
 
 /**
  * Largest safe write-without-response payload: the 23-byte default ATT MTU
