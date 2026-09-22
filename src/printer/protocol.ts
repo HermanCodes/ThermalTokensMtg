@@ -59,9 +59,25 @@ export const DEFAULT_SPEED = 0x05;
 export const DEFAULT_DENSITY = 0x0f;
 export const DEFAULT_MEDIA = MEDIA_LABEL_WITH_GAPS;
 
-/** Send payload in 128-byte GATT chunks with a small delay between them. */
-export const CHUNK_SIZE = 128;
-export const CHUNK_DELAY_MS = 20;
+/**
+ * GATT write size.
+ *
+ * 180 sits just under the 182-byte payload of the 185-byte ATT MTU that modern
+ * phones negotiate, so each chunk is one ATT operation rather than a long
+ * write. Fewer, larger writes means fewer round trips: the write count is what
+ * dominates print time, not the byte count.
+ */
+export const CHUNK_SIZE = 180;
+
+/**
+ * Delay between chunks. Zero by default.
+ *
+ * A write-with-response already waits for the printer to acknowledge, which is
+ * the flow control — an extra sleep on top just adds latency per chunk, and at
+ * ~200 chunks a 20ms delay was costing about 6 seconds a label. Only raise this
+ * if using write-without-response, where nothing paces the stream.
+ */
+export const CHUNK_DELAY_MS = 0;
 
 /**
  * Raster lines per GS v 0 block.

@@ -227,10 +227,15 @@ function drawTall(
 function wideSizes(W: number) {
   return {
     pad: Math.round(W * 0.02),
-    name: Math.round(W * 0.115), // ~44px at 48mm
-    type: Math.round(W * 0.052), // ~20px
-    oracle: Math.round(W * 0.047), // ~18px
-    minOracle: Math.round(W * 0.031), // ~12px floor
+    // 38px keeps most two-word token names on one line beside the P/T,
+    // which saves ~11mm of roll versus wrapping them.
+    name: Math.round(W * 0.1), // ~38px = 4.75mm at 48mm wide
+    pt: Math.round(W * 0.135), // ~52px = 6.5mm
+    type: Math.round(W * 0.062), // ~24px = 3.0mm
+    // Rules text has to survive 203dpi at 1 bit, where anything under ~3mm
+    // breaks up. Height is free on continuous roll, so spend it here.
+    oracle: Math.round(W * 0.075), // ~29px = 3.6mm
+    minOracle: Math.round(W * 0.057), // ~22px = 2.75mm floor
   };
 }
 
@@ -238,9 +243,10 @@ interface WideLayout {
   /** Natural height for this content. */
   height: number;
   pad: number;
-  contentW: number;
-  ptCol: number;
+  /** Height of the name / type / P-T band above the divider. */
+  bandH: number;
   ptSize: number;
+  ptWidth: number;
   pt?: string;
   name: { size: number; lines: string[] };
   type: { size: number; lines: string[] } | null;
@@ -249,6 +255,9 @@ interface WideLayout {
 
 /**
  * Work out the wide layout for a token at a given width.
+ *
+ * The P/T sits beside the name in a top band rather than in a full-height
+ * column, which hands the rules text the entire width instead of ~70% of it.
  *
  * Measuring and drawing share this so they cannot drift: `naturalWideHeight`
  * returns `height` and `drawWide` renders exactly what was measured.
@@ -260,74 +269,64 @@ function layoutWide(token: TokenCard, W: number, opts: LabelOptions): WideLayout
   canvas.height = 8;
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
 
+  // --- P/T, sized to the band ---------------------------------------------
   const pt = ptLabel(token);
   let ptSize = 0;
-  let ptCol = 0;
+  let ptWidth = 0;
   if (pt) {
-    // Size the column to the text it holds: "1/1" needs far less room than
-    // "10/10", and every pixel saved goes to the rules text.
-    ptSize = Math.round(W * 0.14);
+    ptSize = S.pt;
     ctx.font = `bold ${ptSize}px ${SANS}`;
-    ptCol = Math.min(Math.round(W * 0.3), Math.round(ctx.measureText(pt).width + S.pad * 2.5));
-    while (ptSize > 12 && ctx.measureText(pt).width > ptCol - S.pad * 1.5) {
+    // Never let it swallow more than a third of the width.
+    const cap = Math.round(W * 0.34);
+    while (ptSize > 14 && ctx.measureText(pt).width > cap) {
       ptSize -= 1;
       ctx.font = `bold ${ptSize}px ${SANS}`;
     }
+    ptWidth = Math.ceil(ctx.measureText(pt).width);
   }
 
-  const contentW = W - S.pad * 2 - ptCol;
-  const name = fit(ctx, token.name, contentW, 2, S.name, 12);
+  // Name and type line share the band, to the left of the P/T.
+  const bandW = W - S.pad * 2 - (pt ? ptWidth + Math.round(S.pad * 1.2) : 0);
+  const name = fit(ctx, token.name, bandW, 2, S.name, 14);
 
   let type: { size: number; lines: string[] } | null = null;
   if (opts.showTypeLine !== false && token.typeLine) {
-    type = fit(ctx, tidyTypeLine(token.typeLine), contentW, 1, S.type, 9, 'normal');
+    type = fit(ctx, tidyTypeLine(token.typeLine), bandW, 1, S.type, 11, 'normal');
   }
 
+  let textBandH = name.lines.length * Math.round(name.size * 1.04);
+  if (type) textBandH += Math.round(type.size * 1.2);
+  const bandH = Math.max(textBandH, pt ? Math.round(ptSize * 1.1) : 0);
+
+  // --- rules text, full width --------------------------------------------
   const oracleText = flattenSymbols(token.oracleText).trim();
   let oracle: { size: number; lines: string[] } | null = null;
   if (opts.showOracle !== false && oracleText) {
-    // No height budget to satisfy any more: use the preferred size and let the
-    // block grow. Only drop size if a single word will not fit the column.
+    const full = W - S.pad * 2;
     let chosen = { size: S.minOracle, lines: [] as string[] };
     for (let size = S.oracle; size >= S.minOracle; size -= 1) {
       ctx.font = `${size}px ${SANS}`;
-      const lines = wrap(ctx, oracleText, contentW);
-      if (lines.every((l) => ctx.measureText(l).width <= contentW)) {
+      const lines = wrap(ctx, oracleText, full);
+      if (lines.every((l) => ctx.measureText(l).width <= full)) {
         chosen = { size, lines };
         break;
       }
     }
     if (chosen.lines.length === 0) {
       ctx.font = `${S.minOracle}px ${SANS}`;
-      chosen = { size: S.minOracle, lines: wrap(ctx, oracleText, contentW) };
+      chosen = { size: S.minOracle, lines: wrap(ctx, oracleText, full) };
     }
     oracle = chosen;
   }
 
-  // Sum the natural height of the text column.
-  let textH = S.pad;
-  textH += name.lines.length * Math.round(name.size * 1.04);
-  if (type) textH += type.lines.length * Math.round(type.size * 1.15);
+  let height = S.pad + bandH;
   if (oracle) {
-    textH += Math.round(S.pad * 0.5) + 1 + Math.round(S.pad * 0.6);
-    textH += oracle.lines.length * Math.round(oracle.size * 1.2);
+    height += Math.round(S.pad * 0.7) + 2 + Math.round(S.pad * 0.7);
+    height += oracle.lines.length * Math.round(oracle.size * 1.22);
   }
-  textH += S.pad;
+  height += S.pad;
 
-  // The P/T column sets a floor so a one-line token is not absurdly short.
-  const ptFloor = pt ? Math.round(ptSize * 1.35) + S.pad : 0;
-
-  return {
-    height: Math.max(textH, ptFloor),
-    pad: S.pad,
-    contentW,
-    ptCol,
-    ptSize,
-    pt,
-    name,
-    type,
-    oracle,
-  };
+  return { height, pad: S.pad, bandH, ptSize, ptWidth, pt, name, type, oracle };
 }
 
 /**
@@ -349,11 +348,11 @@ export function naturalWideHeight(
 }
 
 /**
- * Two-column layout: text on the left, P/T in its own right-hand column.
+ * Name and P/T in a top band, rules text full width beneath.
  *
- * Taking the P/T out of the vertical flow is what makes a short, wide block
- * work — it frees the full height for the name and rules text, and the P/T ends
- * up larger than it was when squeezed into a corner.
+ * Keeping the P/T out of the rules-text column is what makes the small print
+ * legible: at 203dpi and 1 bit, narrower columns force a smaller size, and
+ * anything under ~3mm falls apart.
  */
 function drawWide(
   ctx: CanvasRenderingContext2D,
@@ -363,9 +362,10 @@ function drawWide(
   H: number,
 ): void {
   const L = layoutWide(token, W, opts);
-  const { pad, contentW } = L;
+  const { pad } = L;
   let y = pad;
 
+  // --- name ---------------------------------------------------------------
   ctx.font = `bold ${L.name.size}px ${SANS}`;
   for (const line of L.name.lines) {
     ctx.fillText(line, pad, y);
@@ -376,31 +376,30 @@ function drawWide(
     ctx.font = `${L.type.size}px ${SANS}`;
     for (const line of L.type.lines) {
       ctx.fillText(line, pad, y);
-      y += Math.round(L.type.size * 1.15);
+      y += Math.round(L.type.size * 1.2);
     }
   }
 
+  // --- P/T, top-right of the band ----------------------------------------
+  if (L.pt) {
+    ctx.font = `bold ${L.ptSize}px ${SANS}`;
+    ctx.fillText(L.pt, W - pad - L.ptWidth, pad);
+  }
+
+  // --- rules text, spanning the full width -------------------------------
   if (L.oracle) {
-    y += Math.round(pad * 0.5);
-    ctx.fillRect(pad, y, contentW, 1);
-    y += Math.round(pad * 0.6) + 1;
+    let ry = pad + L.bandH + Math.round(pad * 0.7);
+    ctx.fillRect(pad, ry, W - pad * 2, 2);
+    ry += 2 + Math.round(pad * 0.7);
+
     ctx.font = `${L.oracle.size}px ${SANS}`;
-    const lineH = Math.round(L.oracle.size * 1.2);
+    const lineH = Math.round(L.oracle.size * 1.22);
     for (const line of L.oracle.lines) {
       // Clip rather than overflow if the caller forced a shorter block.
-      if (y + lineH > H) break;
-      ctx.fillText(line, pad, y);
-      y += lineH;
+      if (ry + lineH > H) break;
+      ctx.fillText(line, pad, ry);
+      ry += lineH;
     }
-  }
-
-  // --- P/T: vertically centred in its own column, with a separating rule ---
-  if (L.pt) {
-    const colX = W - L.ptCol;
-    ctx.fillRect(colX - Math.round(pad * 0.6), pad, 1, H - pad * 2);
-    ctx.font = `bold ${L.ptSize}px ${SANS}`;
-    const w = ctx.measureText(L.pt).width;
-    ctx.fillText(L.pt, colX + (L.ptCol - w) / 2, Math.round((H - L.ptSize * 1.15) / 2));
   }
 
   if (opts.cornerNote) {
@@ -409,7 +408,6 @@ function drawWide(
     ctx.fillText(opts.cornerNote, pad, H - pad - nSize);
   }
 }
-
 
 /** Load an image with CORS enabled so its pixels can be read back. */
 export function loadArt(url: string): Promise<HTMLImageElement> {

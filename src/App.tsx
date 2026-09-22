@@ -561,10 +561,12 @@ export default function App() {
       return;
     }
     setStatus({ kind: 'busy', msg: 'Printing…' });
+    const started = performance.now();
     try {
+      // Render once; every copy sends the same raster.
+      const out = renderRaster();
+      if (!out) throw new Error('Nothing to print yet — the card image is still loading');
       for (let i = 0; i < copies; i++) {
-        const out = renderRaster();
-        if (!out) throw new Error('Nothing to print yet — the card image is still loading');
         await printRaster(t, out.raster, out.height, geometry.widthBytes, {
           density,
           chunkSize,
@@ -574,9 +576,13 @@ export default function App() {
           onProgress: (f) => setProgress((i + f) / copies),
         });
       }
+      const secs = ((performance.now() - started) / 1000).toFixed(1);
       setStatus({
         kind: 'ok',
-        msg: copies > 1 ? `Printed ${copies} × ${selected.name}` : `Printed ${selected.name}`,
+        msg:
+          copies > 1
+            ? `Printed ${copies} × ${selected.name} in ${secs}s`
+            : `Printed ${selected.name} in ${secs}s`,
       });
     } catch (e) {
       setStatus({ kind: 'err', msg: (e as Error).message });

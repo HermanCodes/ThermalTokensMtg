@@ -151,10 +151,15 @@ export function buildCombinedLabel(
   // --- text: hard threshold, no tone shift, no diffusion ------------------
   scratch.width = W;
   scratch.height = textH;
+  // Force the wide layout. The height above was measured with it, and letting
+  // drawLabel re-decide by aspect ratio would pick the stacked layout once the
+  // auto-sized block turns squarish — crushing the rules text to fit above a
+  // bottom-corner P/T, and disagreeing with the height we just reserved.
   drawLabel(scratch, token, {
     widthPx: W,
     heightPx: textH,
     showArt: false,
+    layout: 'wide',
   });
   blit(
     out,

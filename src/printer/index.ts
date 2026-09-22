@@ -1,6 +1,17 @@
 import * as P from './protocol';
 import { sleep, type Transport } from './transport';
 
+/** Join byte arrays into one buffer. */
+function concat(...parts: Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let off = 0;
+  for (const p of parts) {
+    out.set(p, off);
+    off += p.length;
+  }
+  return out;
+}
+
 export * from './protocol';
 export type { Transport, ConnectOptions } from './transport';
 export { WebBluetoothTransport } from './webBluetooth';
@@ -76,10 +87,12 @@ export async function printRaster(
   const delay = opts.chunkDelayMs ?? P.CHUNK_DELAY_MS;
   const maxLines = Math.max(1, opts.maxBlockLines ?? P.MAX_BLOCK_LINES);
 
-  await transport.write(P.cmdSpeed(opts.speed));
-  await transport.write(P.cmdDensity(opts.density));
-  await transport.write(P.cmdMedia(opts.media));
+  // One write instead of three: each round trip costs a BLE connection
+  // interval, and these are tiny.
+  await transport.write(concat(P.cmdSpeed(opts.speed), P.cmdDensity(opts.density), P.cmdMedia(opts.media)));
 
+  const blocks = Math.ceil(height / maxLines);
+  let blockIndex = 0;
   for (let line = 0; line < height; line += maxLines) {
     const lines = Math.min(maxLines, height - line);
     const head = P.rasterHeader(lines, widthBytes);
@@ -92,11 +105,16 @@ export async function printRaster(
 
     for (const c of P.chunk(payload, chunkSize)) {
       await transport.write(c);
-      await sleep(delay);
+      // Skip the timer entirely at zero: setTimeout is clamped to a few ms, so
+      // even `sleep(0)` would cost a second across a few hundred chunks.
+      if (delay > 0) await sleep(delay);
     }
     opts.onProgress?.(Math.min(1, (line + lines) / height));
-    // Let the printer drain the block before the next header arrives.
-    await sleep(P.BLOCK_DELAY_MS);
+
+    // Let the printer drain before the next header arrives — but there is no
+    // next header after the last block.
+    blockIndex++;
+    if (blockIndex < blocks) await sleep(P.BLOCK_DELAY_MS);
   }
 
   await transport.write(P.footer());
