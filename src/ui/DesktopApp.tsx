@@ -47,6 +47,7 @@ export default function DesktopApp({
     writeMode, setWriteMode, chunkSize, setChunkSize,
     chunkDelay, setChunkDelay, maxBlockLines, setMaxBlockLines,
     supported, diag, showDiag, setShowDiag,
+    maxJobBytes, setMaxJobBytes,
     connect, print, testPrint,
   } = api;
 
@@ -544,6 +545,18 @@ export default function DesktopApp({
                     [180, '180 B'],
                   ]}
                   onChange={(v) => setChunkSize(Number(v))}
+                />
+                <SelectRow
+                  label="Max job size"
+                  value={maxJobBytes}
+                  options={[
+                    [30000, '30 KB'],
+                    [38000, '38 KB'],
+                    [44000, '44 KB (measured)'],
+                    [50000, '50 KB'],
+                    [200000, 'No limit'],
+                  ]}
+                  onChange={(v) => setMaxJobBytes(Number(v))}
                 />
                 <SelectRow
                   label="Lines per block"

@@ -123,6 +123,20 @@ export const SAFE_NO_RESPONSE_CHUNK = 20;
  * images (a tall calibration strip), accepting the gaps.
  */
 export const MAX_BLOCK_LINES = 0xffff;
+/**
+ * Largest raster the printer will accept as one job, in bytes.
+ *
+ * Measured, not documented: a 113mm label (43,392 bytes plus tear feed) prints,
+ * a 144mm one (55,296) does not, and a 167mm calibration strip printed nothing
+ * at all. The failure mode is telling — the whole image is discarded and the
+ * feed still runs, so the raster is being rejected up front rather than
+ * overflowing part-way through. Anything larger is therefore split into
+ * separate jobs rather than one long raster.
+ *
+ * 44,000 sits just under the largest size known to work.
+ */
+export const MAX_JOB_BYTES = 44000;
+
 /** Conservative split size for images too long to send as one block. */
 export const SAFE_BLOCK_LINES = 256;
 /**

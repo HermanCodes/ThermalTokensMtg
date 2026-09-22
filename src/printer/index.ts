@@ -46,10 +46,10 @@ export interface PrintOptions {
  * flow does), then the bitmap streams as one or more GS v 0 blocks, then the
  * footer releases the label.
  *
- * Long images MUST be split into several blocks: a single block big enough for,
- * say, a 170mm calibration strip (~53 KB) overflows the printer's buffer and the
- * whole job is silently dropped. Each block carries its own header, so the
- * printer digests one bufferful at a time.
+ * This sends ONE job. The printer will not accept a raster beyond about 44 KB,
+ * and splitting into multiple GS v 0 blocks within a job makes it feed between
+ * them, which shows up as gaps through the label. Use `printSectioned` for
+ * anything long: it breaks the image into separate jobs instead.
  */
 export async function printRaster(
   transport: Transport,
@@ -86,6 +86,13 @@ export async function printRaster(
    */
   const requested = opts.chunkSize ?? P.CHUNK_SIZE;
   const chunkSize = opts.unacknowledged ? Math.min(requested, P.SAFE_NO_RESPONSE_CHUNK) : requested;
+
+  // No automatic pacing. The evidence says an oversized raster is rejected up
+  // front — the whole image is discarded and only the feed runs — rather than
+  // overflowing part-way through, and `printSectioned` keeps every job inside
+  // the size that already prints unpaced. Pacing by job size was measured at
+  // 7.6s for a 113mm label that prints in about two, so it cost speed on
+  // working labels to guard against a failure mode that is not happening.
   const delay = opts.chunkDelayMs ?? P.CHUNK_DELAY_MS;
   const maxLines = Math.max(1, opts.maxBlockLines ?? P.MAX_BLOCK_LINES);
 
@@ -146,4 +153,80 @@ export async function printTestPattern(
     if (on) raster.fill(0xff, y * widthBytes, (y + 1) * widthBytes);
   }
   await printRaster(transport, raster, height, widthBytes, opts);
+}
+
+
+/** Where a long label was divided, so the caller can describe what happened. */
+export interface SectionPlan {
+  /** First raster line of each section, and how many lines it covers. */
+  sections: { from: number; lines: number }[];
+  bytesPerSection: number[];
+}
+
+/**
+ * Work out how to divide a raster into printable jobs.
+ *
+ * Splits on whole lines at the largest size the printer accepts. A single
+ * section is returned unchanged, so short labels are unaffected.
+ */
+export function planSections(
+  height: number,
+  widthBytes: number,
+  maxBytes = P.MAX_JOB_BYTES,
+): SectionPlan {
+  const linesPerJob = Math.max(1, Math.floor(maxBytes / widthBytes));
+  if (height <= linesPerJob) {
+    return { sections: [{ from: 0, lines: height }], bytesPerSection: [height * widthBytes] };
+  }
+  // Spread the lines evenly rather than leaving a sliver at the end: a 2mm
+  // final section would be torn off and lost.
+  const count = Math.ceil(height / linesPerJob);
+  const even = Math.ceil(height / count);
+  const sections: { from: number; lines: number }[] = [];
+  for (let from = 0; from < height; from += even) {
+    sections.push({ from, lines: Math.min(even, height - from) });
+  }
+  return {
+    sections,
+    bytesPerSection: sections.map((s) => s.lines * widthBytes),
+  };
+}
+
+/**
+ * Print a raster of any length, dividing it into separate jobs if need be.
+ *
+ * The printer rejects a raster beyond roughly 44 KB outright — the image is
+ * discarded and only the feed runs, so a long label appears to "print" as blank
+ * paper. Splitting inside a single job is not the answer either, because the
+ * printer feeds between GS v 0 blocks and the gaps land in the middle of the
+ * label. Separate jobs are the one approach that works: each is small enough to
+ * be accepted, and only the last carries the tear-off feed, so the sections
+ * come out as one continuous strip with a minimal seam.
+ */
+export async function printSectioned(
+  transport: Transport,
+  raster: Uint8Array,
+  height: number,
+  widthBytes = P.BYTES_PER_LINE,
+  opts: PrintOptions & { maxJobBytes?: number } = {},
+): Promise<{ sections: number }> {
+  const plan = planSections(height, widthBytes, opts.maxJobBytes ?? P.MAX_JOB_BYTES);
+  const total = plan.sections.length;
+
+  for (let i = 0; i < total; i++) {
+    const { from, lines } = plan.sections[i];
+    const slice = raster.subarray(from * widthBytes, (from + lines) * widthBytes);
+    const last = i === total - 1;
+    await printRaster(transport, slice, lines, widthBytes, {
+      ...opts,
+      // Only the final section needs the tear-off allowance; adding it between
+      // sections would push a blank gap into the middle of the label.
+      tearFeedPx: last ? opts.tearFeedPx : 0,
+      onProgress: (f) => opts.onProgress?.((i + f) / total),
+    });
+    // Let the printer finish the section before the next job's setup arrives.
+    if (!last) await sleep(P.BLOCK_DELAY_MS);
+  }
+
+  return { sections: total };
 }
