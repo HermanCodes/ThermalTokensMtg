@@ -31,6 +31,11 @@ export interface PrintOptions {
   /** Delay between chunks; too fast overruns the printer's buffer. */
   chunkDelayMs?: number;
   /**
+   * True when the transport is writing without acknowledgement, so chunks must
+   * be clamped to the guaranteed-safe MTU payload and paced by a delay.
+   */
+  unacknowledged?: boolean;
+  /**
    * Raster lines per GS v 0 block. Long images must be split — a single
    * oversized block is silently dropped by the printer.
    */
@@ -83,7 +88,15 @@ export async function printRaster(
     height = height + tear;
   }
 
-  const chunkSize = opts.chunkSize ?? P.CHUNK_SIZE;
+  /**
+   * A write-without-response cannot exceed the ATT MTU minus 3 and nothing
+   * acknowledges it, so an oversized one is dropped with no error at all: the
+   * job "completes" in milliseconds and the printer waits forever for data.
+   * 20 bytes is the payload of the 23-byte default MTU, which every link
+   * supports, so clamp to it rather than fail silently.
+   */
+  const requested = opts.chunkSize ?? P.CHUNK_SIZE;
+  const chunkSize = opts.unacknowledged ? Math.min(requested, P.SAFE_NO_RESPONSE_CHUNK) : requested;
   const delay = opts.chunkDelayMs ?? P.CHUNK_DELAY_MS;
   const maxLines = Math.max(1, opts.maxBlockLines ?? P.MAX_BLOCK_LINES);
 

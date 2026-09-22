@@ -15,7 +15,10 @@ export interface GattEntry {
 }
 
 /** How the write characteristic was picked — a fallback match is a red flag. */
-export type MatchPath = 'documented' | 'known-service' | 'brute-force';
+export type MatchPath = 'documented' | 'remembered' | 'known-service' | 'brute-force';
+
+/** Where the last working service/characteristic pair is cached. */
+const REMEMBERED_KEY = 'tokenprinter.gatt';
 
 export type WriteMode = 'with-response' | 'without-response';
 
@@ -34,6 +37,8 @@ export class WebBluetoothTransport implements Transport {
   /** Full GATT table from the last connect, so the UI can show what was found. */
   gatt: GattEntry[] = [];
   matchPath?: MatchPath;
+  /** The service/characteristic actually in use. */
+  chosenPair?: { service: string; characteristic: string };
   /** Bytes the printer sent back on the notify characteristic, if any. */
   notifications: string[] = [];
 
@@ -137,22 +142,61 @@ export class WebBluetoothTransport implements Transport {
     const documented = table.find(
       (e) => e.svc === SERVICE_UUID_STR && e.ch.uuid === WRITE_CHAR_UUID_STR,
     );
-    // 2. Any writable characteristic inside a known Phomemo service.
+    // 2. The pair that worked last time on this device. Units that do not
+    //    expose the documented service would otherwise be rediscovered by
+    //    brute force on every connect, and could pick a different
+    //    characteristic if the device ever reports them in another order.
+    const saved = loadRemembered();
+    const remembered = saved
+      ? table.find((e) => e.svc === saved.service && e.ch.uuid === saved.characteristic)
+      : undefined;
+    // 3. Any writable characteristic inside a known Phomemo service.
     const known = table.find(
       (e) => KNOWN_SERVICE_UUIDS.includes(e.svc) && writable(e.ch),
     );
-    // 3. Last resort — anything writable at all.
+    // 4. Last resort — anything writable at all.
     const brute = table.find((e) => writable(e.ch));
 
-    const pick = documented ?? known ?? brute;
-    this.matchPath = documented ? 'documented' : known ? 'known-service' : brute ? 'brute-force' : undefined;
+    const pick = documented ?? remembered ?? known ?? brute;
+    this.matchPath = documented
+      ? 'documented'
+      : remembered
+        ? 'remembered'
+        : known
+          ? 'known-service'
+          : brute
+            ? 'brute-force'
+            : undefined;
 
     if (pick) {
       this.characteristic = pick.ch;
+      this.chosenPair = { service: pick.svc, characteristic: pick.ch.uuid };
       const row = this.gatt.find(
         (g) => g.service === pick.svc && g.characteristic === pick.ch.uuid,
       );
       if (row) row.chosen = true;
+    }
+  }
+
+  /**
+   * Record the pair that worked, so the next connect targets it directly.
+   * Only called once a print has actually succeeded — remembering a guess that
+   * turned out to be wrong would make the wrong choice permanent.
+   */
+  confirmWorking(): void {
+    if (!this.chosenPair) return;
+    try {
+      localStorage.setItem(REMEMBERED_KEY, JSON.stringify(this.chosenPair));
+    } catch {
+      // Private browsing or blocked storage — not worth failing a print over.
+    }
+  }
+
+  forgetRemembered(): void {
+    try {
+      localStorage.removeItem(REMEMBERED_KEY);
+    } catch {
+      /* ignore */
     }
   }
 
@@ -214,5 +258,19 @@ export class WebBluetoothTransport implements Transport {
 
   onDisconnect(cb: () => void): void {
     this.disconnectCb = cb;
+  }
+}
+
+/** The service/characteristic pair that last printed successfully, if any. */
+function loadRemembered(): { service: string; characteristic: string } | null {
+  try {
+    const raw = localStorage.getItem(REMEMBERED_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as { service?: unknown; characteristic?: unknown };
+    return typeof v.service === 'string' && typeof v.characteristic === 'string'
+      ? { service: v.service, characteristic: v.characteristic }
+      : null;
+  } catch {
+    return null;
   }
 }

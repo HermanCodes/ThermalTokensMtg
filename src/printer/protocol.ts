@@ -80,6 +80,14 @@ export const CHUNK_SIZE = 180;
 export const CHUNK_DELAY_MS = 0;
 
 /**
+ * Largest safe write-without-response payload: the 23-byte default ATT MTU
+ * minus the 3-byte header. Links usually negotiate higher, but there is no way
+ * to read the negotiated MTU from Web Bluetooth, and exceeding it fails
+ * silently rather than erroring.
+ */
+export const SAFE_NO_RESPONSE_CHUNK = 20;
+
+/**
  * Raster lines per GS v 0 block.
  *
  * Default is effectively "do not split": the printer FEEDS after finishing each

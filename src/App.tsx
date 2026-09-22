@@ -249,6 +249,7 @@ export default function App() {
   const [labelMm, setLabelMm] = useState({ w: MAX_WIDTH_MM, h: 30 });
   const [mode, setMode] = useState<Mode>('both');
   const [textBlockMm, setTextBlockMm] = useState(26);
+  const [cardMm, setCardMm] = useState(0); // 0 = keep true card proportions
   const [autoTextBlock, setAutoTextBlock] = useState(true);
   const [sweepBright, setSweepBright] = useState('12, 20, 28, 36, 44, 52');
   const [sweepContrast, setSweepContrast] = useState('18');
@@ -425,6 +426,7 @@ export default function App() {
         if (!art) return null;
         return buildCombinedLabel(art, selected, {
           widthBytes: geometry.widthBytes,
+          cardHeightPx: cardMm > 0 ? Math.round(cardMm * 8) : undefined,
           textHeightPx: autoTextBlock ? 'auto' : Math.round(textBlockMm * 8),
           dither,
           brightness,
@@ -461,7 +463,7 @@ export default function App() {
         clahe,
       });
     },
-    [selected, mode, art, cardFit, geometry, showArt, dither, threshold, brightness, contrast, clahe, sweepBright, sweepContrast, cellH, calibLayout, calibContent, textBlockMm, autoTextBlock],
+    [selected, mode, art, cardFit, geometry, showArt, dither, threshold, brightness, contrast, clahe, sweepBright, sweepContrast, cellH, calibLayout, calibContent, textBlockMm, autoTextBlock, cardMm],
   );
 
   // Preview shows the packed 1bpp raster, not the greyscale canvas.
@@ -546,12 +548,13 @@ export default function App() {
         media,
         maxBlockLines,
         tearFeedPx: Math.round(tearMm * 8),
+        unacknowledged: writeMode === 'without-response',
       });
       setStatus({ kind: 'ok', msg: 'Test pattern sent' });
     } catch (e) {
       setStatus({ kind: 'err', msg: (e as Error).message });
     }
-  }, [geometry, density, chunkSize, media, maxBlockLines, tearMm]);
+  }, [geometry, density, chunkSize, media, maxBlockLines, tearMm, writeMode]);
 
   const print = useCallback(async () => {
     if (!selected) return;
@@ -573,9 +576,12 @@ export default function App() {
           media,
           maxBlockLines,
           tearFeedPx: Math.round(tearMm * 8),
+          unacknowledged: writeMode === 'without-response',
           onProgress: (f) => setProgress((i + f) / copies),
         });
       }
+      // Only now is the chosen characteristic proven, so it is safe to reuse.
+      if (t instanceof WebBluetoothTransport) t.confirmWorking();
       const secs = ((performance.now() - started) / 1000).toFixed(1);
       setStatus({
         kind: 'ok',
@@ -589,7 +595,7 @@ export default function App() {
     } finally {
       setProgress(0);
     }
-  }, [selected, copies, geometry, renderRaster, density, chunkSize, media, maxBlockLines, tearMm]);
+  }, [selected, copies, geometry, renderRaster, density, chunkSize, media, maxBlockLines, tearMm, writeMode]);
 
   const busy = status.kind === 'busy';
   const open = (c: TokenCard) => {
@@ -871,6 +877,17 @@ export default function App() {
                 onChange={setTextBlockMm}
               />
             )}
+            {mode === 'both' && (
+              <SliderRow
+                label="Card height"
+                display={cardMm > 0 ? `${cardMm} mm` : 'full'}
+                value={cardMm}
+                min={0}
+                max={70}
+                step={5}
+                onChange={setCardMm}
+              />
+            )}
             {mode === 'card' && (
               <SelectRow
                 label="Card shape"
@@ -1000,6 +1017,13 @@ export default function App() {
                 )}
               </div>
               <div className="group">
+                {writeMode === 'without-response' && (
+                  <p className="footnote warn">
+                    Without response, chunks are capped at 20 bytes — anything larger is
+                    dropped by the link with no error. Reliable but slower; use With
+                    response unless you are testing.
+                  </p>
+                )}
                 <SelectRow
                   label="Write mode"
                   value={writeMode}
