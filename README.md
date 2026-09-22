@@ -3,8 +3,11 @@
 Search for any Magic: The Gathering token — or any card at all — and print it to
 a Phomemo M110 thermal label printer over Bluetooth.
 
-Built because clone and copy decks need token copies of real cards, and because
-speaking a card name at a phone is a worse way to find one than typing it.
+Inspired by **Cauldron**, which introduced me to the idea of printing tokens on
+a Phomemo at the table. This is my own take on it, built to give myself more
+control over the parts I most wanted to tune: typed search instead of voice,
+tone and layout adjustable per print, and the ability to print any card rather
+than only tokens — which is what clone and copy decks keep asking for.
 
 **Live app: <https://hermancodes.github.io/mtg-token-printer/>**
 
