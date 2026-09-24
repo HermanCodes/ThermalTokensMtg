@@ -158,8 +158,13 @@ src/
     gattPick.ts        shared characteristic selection
 ```
 
-## Notes
+## Licence
 
-Personal project, no licence, no warranty. Not affiliated with Wizards of the
-Coast, Scryfall or Phomemo. Card data and images come from Scryfall under their
-terms; Magic: The Gathering is a trademark of Wizards of the Coast.
+[MIT](LICENSE). Use it, fork it, sell it — just keep the notice. No warranty:
+it drives a thermal printer over Bluetooth and it is not my fault if yours
+disagrees with it.
+
+Not affiliated with Wizards of the Coast, Scryfall or Phomemo. Card data and
+images are fetched from Scryfall at request time under their terms and are not
+redistributed here. Magic: The Gathering is a trademark of Wizards of the
+Coast.
