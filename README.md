@@ -1,4 +1,4 @@
-# MTG Token Printer
+# Thermal Tokens MTG
 
 Search for any Magic: The Gathering token — or any card at all — and print it to
 a Phomemo M110 thermal label printer over Bluetooth.
@@ -9,7 +9,7 @@ control over the parts I most wanted to tune: typed search instead of voice,
 tone and layout adjustable per print, and the ability to print any card rather
 than only tokens — which is what clone and copy decks keep asking for.
 
-**Live app: <https://hermancodes.github.io/mtg-token-printer/>**
+**Live app: <https://hermancodes.github.io/ThermalTokensMtg/>**
 
 ---
 

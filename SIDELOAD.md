@@ -92,10 +92,10 @@ installer only affects newly opened windows.
 The simplest way needs no git at all.
 
 1. In **Safari** on the Mac, go to:
-   <https://github.com/HermanCodes/mtg-token-printer>
+   <https://github.com/HermanCodes/ThermalTokensMtg>
 2. Click the green **Code** button → **Download ZIP**.
 3. Open your **Downloads** folder in Finder and **double-click the ZIP** to
-   unpack it. You will get a folder called `mtg-token-printer-main`.
+   unpack it. You will get a folder called `ThermalTokensMtg-main`.
 4. Drag that folder to your **Desktop**, so it is easy to find.
 
 <details>
@@ -105,10 +105,10 @@ If you would rather have git so you can pull updates later, run this in
 Terminal after Xcode is installed:
 
 ```bash
-cd ~/Desktop && git clone https://github.com/HermanCodes/mtg-token-printer.git
+cd ~/Desktop && git clone https://github.com/HermanCodes/ThermalTokensMtg.git
 ```
 
-Then use `mtg-token-printer` in place of `mtg-token-printer-main` everywhere
+Then use `ThermalTokensMtg` in place of `ThermalTokensMtg-main` everywhere
 below.
 </details>
 
@@ -120,7 +120,7 @@ Open **Terminal** and move into the folder. If you put it on the Desktop and
 used the ZIP:
 
 ```bash
-cd ~/Desktop/mtg-token-printer-main
+cd ~/Desktop/ThermalTokensMtg-main
 ```
 
 `~` means your home folder. If that errors with "No such file or directory",
@@ -307,7 +307,7 @@ becomes a nuisance.
 Once everything above is done, updating is three commands and a keypress:
 
 ```bash
-cd ~/Desktop/mtg-token-printer-main
+cd ~/Desktop/ThermalTokensMtg-main
 ```
 
 If you used git:
